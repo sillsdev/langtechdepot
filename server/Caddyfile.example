@@ -1,0 +1,18 @@
+# Copy to /etc/caddy/Caddyfile. Caddy obtains and renews the Let's Encrypt
+# certificate on its own, which is the whole reason to use it here.
+#
+#   sudo apt install caddy
+#   sudo systemctl reload caddy
+#
+# Requires port 80 and 443 open to this host and the name below pointed at it.
+
+langtran.lingtransoft.info {
+	encode gzip
+
+	# The registration service binds to localhost only; Caddy is its TLS front.
+	reverse_proxy 127.0.0.1:8385
+
+	log {
+		output file /var/log/caddy/langtran.log
+	}
+}

@@ -1,35 +1,27 @@
 <#
 LangTran Sync installer (Windows).
 
-Installs Syncthing (via winget when available), runs it at logon, connects it
-to the LangTran server, and opens the GUI so the user can pick which folders
-to subscribe to. Idempotent: safe to re-run.
+Installs Syncthing, registers this machine with the LangTran server using the
+token you were issued, and leaves you at the folder catalog. Idempotent.
 
-No admin rights needed - everything installs per-user.
-To run: right-click this file and choose "Run with PowerShell".
+Right-click this file and choose "Run with PowerShell".
+
+No token yet? Register at the URL below and one is emailed to you.
 #>
 
 $ErrorActionPreference = 'Stop'
 
-# ---- Fill these in after the server is stood up -----------------------------
-$ServerDeviceId = 'REPLACE-WITH-SERVER-DEVICE-ID'
-$ServerAddress  = 'tcp://sync.lingtransoft.info:22000'   # static address of the CA server
-$JoinToken      = 'REPLACE-WITH-JOIN-TOKEN'
-# -----------------------------------------------------------------------------
+$RegisterUrl = 'https://langtran.lingtransoft.info'
 
 $HomeDir  = Join-Path $env:LOCALAPPDATA 'LangTranSync\config'
-$DataRoot = Join-Path $env:USERPROFILE 'LangTran'        # where subscribed folders land
+$DataRoot = Join-Path $env:USERPROFILE 'LangTran'
 $GuiUrl   = 'http://127.0.0.1:8384'
-
-if ($ServerDeviceId -like 'REPLACE-*' -or $JoinToken -like 'REPLACE-*') {
-    throw 'Edit the ServerDeviceId / JoinToken variables at the top of this script first.'
-}
 
 New-Item -ItemType Directory -Force $HomeDir, $DataRoot | Out-Null
 
-# Locate syncthing.exe: next to this script, already on PATH / winget shim,
-# else install through winget. No raw binary downloads here on purpose -
-# antivirus dropper heuristics flag download-and-persist scripts.
+# Syncthing is installed by winget or placed here by hand, never fetched by
+# this script: antivirus dropper heuristics flag scripts that pull down an
+# executable and then register it for startup.
 function Find-Syncthing {
     $local = Join-Path $PSScriptRoot 'syncthing.exe'
     if (Test-Path $local) { return $local }
@@ -48,7 +40,7 @@ if (-not $Exe) {
         $Exe = Find-Syncthing
     }
     if (-not $Exe) {
-        throw 'Syncthing not found. Download it from https://syncthing.net/downloads/ and place syncthing.exe next to this script, then re-run.'
+        throw "Syncthing not found. Get it from https://syncthing.net/downloads/, put syncthing.exe next to this script, and re-run."
     }
 }
 Write-Host "Using Syncthing at $Exe"
@@ -59,7 +51,7 @@ if (-not (Test-Path (Join-Path $HomeDir 'config.xml'))) {
 $ApiKey = ([xml](Get-Content (Join-Path $HomeDir 'config.xml'))).configuration.gui.apikey
 $Headers = @{ 'X-API-Key' = $ApiKey }
 
-# Run at logon via Task Scheduler - no service manager dependency, per-user.
+# Start at logon through Task Scheduler - per-user, no service install, no admin.
 $TaskName = 'LangTran Sync'
 $action  = New-ScheduledTaskAction -Execute $Exe -Argument "serve --no-console --no-browser --home `"$HomeDir`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
@@ -68,35 +60,78 @@ $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
-Write-Host 'Waiting for Syncthing API...'
+Write-Host 'Waiting for Syncthing...'
 $deadline = (Get-Date).AddSeconds(60)
 while ($true) {
     try { Invoke-RestMethod "$GuiUrl/rest/system/status" -Headers $Headers | Out-Null; break }
-    catch { if ((Get-Date) -gt $deadline) { throw 'Syncthing did not come up within 60s.' }; Start-Sleep 2 }
+    catch {
+        if ((Get-Date) -gt $deadline) { throw 'Syncthing did not start within 60s.' }
+        Start-Sleep 2
+    }
 }
 
-$myId = (Invoke-RestMethod "$GuiUrl/rest/system/status" -Headers $Headers).myID
+$MyId = (Invoke-RestMethod "$GuiUrl/rest/system/status" -Headers $Headers).myID
+$DeviceName = "$env:USERNAME-$env:COMPUTERNAME"
 
-# Name embeds the join token - the server's auto-accept poller keys on it.
-Invoke-RestMethod -Method Patch "$GuiUrl/rest/config/devices/$myId" -Headers $Headers -ContentType 'application/json' `
-    -Body (@{ name = "LT-$JoinToken-$env:USERNAME-$env:COMPUTERNAME" } | ConvertTo-Json)
-
-# Server device: introducer=true makes this client auto-learn its peers (swarm).
-Invoke-RestMethod -Method Post "$GuiUrl/rest/config/devices" -Headers $Headers -ContentType 'application/json' `
-    -Body (@{
-        deviceID   = $ServerDeviceId
-        name       = 'LangTran Server'
-        addresses  = @('dynamic', $ServerAddress)
-        introducer = $true
-    } | ConvertTo-Json)
-
-# Folders accepted later default to receive-only under the LangTran data root.
-Invoke-RestMethod -Method Patch "$GuiUrl/rest/config/defaults/folder" -Headers $Headers -ContentType 'application/json' `
-    -Body (@{ type = 'receiveonly'; path = $DataRoot } | ConvertTo-Json)
+# Name this device for the cluster. It deliberately carries no token: Syncthing
+# broadcasts device names to every peer, so a token here would leak to them all.
+Invoke-RestMethod -Method Patch "$GuiUrl/rest/config/devices/$MyId" -Headers $Headers -ContentType 'application/json' `
+    -Body (@{ name = $DeviceName } | ConvertTo-Json) | Out-Null
 
 Write-Host ''
-Write-Host "Installed. Device ID: $myId"
+Write-Host "This machine's device ID: $MyId"
+Write-Host "No token yet? Register at $RegisterUrl"
+Write-Host ''
+
+$Registration = $null
+foreach ($attempt in 1..3) {
+    $token = (Read-Host 'Paste your LangTran token').Trim()
+    if (-not $token) { Write-Host 'Nothing entered.'; continue }
+
+    $payload = @{ token = $token; deviceID = $MyId; deviceName = $DeviceName } | ConvertTo-Json
+    try {
+        $Registration = Invoke-RestMethod -Method Post "$RegisterUrl/register" `
+            -ContentType 'application/json' -Body $payload
+        break
+    } catch {
+        $reason = 'could not reach the registration server'
+        if ($_.ErrorDetails.Message) {
+            try { $reason = ($_.ErrorDetails.Message | ConvertFrom-Json).error } catch { }
+        }
+        Write-Host "Registration failed: $reason"
+        if ($attempt -lt 3) { Write-Host 'Try again.' }
+    }
+}
+
+if (-not $Registration) {
+    Write-Host ''
+    Write-Host 'Giving up after 3 attempts. Syncthing is installed and running; re-run this'
+    Write-Host "script once you have a working token. Ask for help at $RegisterUrl"
+    exit 1
+}
+
+# The server tells us its own identity, so nothing about it is hardcoded here.
+# introducer=true: the server introduces us to other field machines, so they
+# swarm with each other instead of every download crossing the ocean.
+try {
+    Invoke-RestMethod -Method Post "$GuiUrl/rest/config/devices" -Headers $Headers -ContentType 'application/json' `
+        -Body (@{
+            deviceID   = $Registration.serverDeviceID
+            name       = 'LangTran Server'
+            addresses  = @($Registration.serverAddresses)
+            introducer = $true
+        } | ConvertTo-Json) | Out-Null
+} catch {
+    Write-Host 'Server device was already configured; leaving it as is.'
+}
+
+# Receive-only: a stray local edit gets flagged and reverted, never propagated.
+Invoke-RestMethod -Method Patch "$GuiUrl/rest/config/defaults/folder" -Headers $Headers -ContentType 'application/json' `
+    -Body (@{ type = 'receiveonly'; path = $DataRoot } | ConvertTo-Json) | Out-Null
+
+Write-Host ''
+Write-Host 'Registered.'
 Write-Host "Sync data root: $DataRoot"
-Write-Host 'Within a minute or two the server will offer the folder catalog.'
-Write-Host 'Accept the folders you want in the browser window that opens (Add buttons appear at the top).'
+Write-Host 'The folder catalog will appear within a minute or two.'
+Write-Host 'Click Add on the folders you want in the browser window that opens.'
 Start-Process $GuiUrl
