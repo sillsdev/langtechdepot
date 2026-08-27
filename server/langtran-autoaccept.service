@@ -1,0 +1,10 @@
+[Unit]
+Description=LangTran Syncthing auto-accept poller
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/langtran/autoaccept.env
+ExecStart=/usr/bin/python3 /opt/langtran-sync/autoaccept.py
+# Run as the same user that owns the Syncthing instance
+User=syncthing
