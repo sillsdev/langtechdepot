@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# LangTechDepot Sync installer (Linux).
+# LangTechDepot installer (Linux).
 #
 # Installs Syncthing, registers this machine with the LangTechDepot server using the
 # token you were issued, and leaves you at the folder catalog. Idempotent.
 # Needs: curl, tar, python3, systemd user session.
 #
-#   bash install-langtechdepot-sync.sh
+#   bash install-langtechdepot.sh
 #
 # No token yet? Register at the URL below and one is emailed to you.
 
@@ -43,9 +43,9 @@ CONFIG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/syncthing"
 
 # Per-user unit: no root needed, and lingering keeps it syncing when logged out.
 mkdir -p "$HOME/.config/systemd/user"
-cat > "$HOME/.config/systemd/user/langtechdepot-sync.service" <<EOF
+cat > "$HOME/.config/systemd/user/langtechdepot.service" <<EOF
 [Unit]
-Description=LangTechDepot Sync (Syncthing)
+Description=LangTechDepot (Syncthing)
 After=network.target
 
 [Service]
@@ -56,7 +56,7 @@ Restart=on-failure
 WantedBy=default.target
 EOF
 systemctl --user daemon-reload
-systemctl --user enable --now langtechdepot-sync.service
+systemctl --user enable --now langtechdepot.service
 loginctl enable-linger "$USER" 2>/dev/null || true
 
 API_KEY=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$CONFIG_DIR/config.xml').find('./gui/apikey').text)")

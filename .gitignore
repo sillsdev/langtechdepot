@@ -1,5 +1,5 @@
 # Bitdefender-quarantined leftover on the authoring machine; unreadable, and
 # ransomware remediation resurrects it on delete. Clear it from the
-# Bitdefender console, then drop this entry. Replacement: setup-langtechdepot-sync.ps1.
+# Bitdefender console, then drop this entry. Replacement: setup-langtechdepot.ps1.
 client/install-langtran-sync.ps1
 __pycache__/

@@ -61,8 +61,8 @@ minute.
 This is how field machines join. Nothing else admits a device.
 
 ```bash
-sudo mkdir -p /opt/langtechdepot-sync /etc/langtechdepot
-sudo cp register.py /opt/langtechdepot-sync/
+sudo mkdir -p /opt/langtechdepot /etc/langtechdepot
+sudo cp register.py /opt/langtechdepot/
 sudo cp register.env.example /etc/langtechdepot/register.env
 sudo chmod 600 /etc/langtechdepot/register.env
 sudo $EDITOR /etc/langtechdepot/register.env    # API key, SERVER_ADDRESS, PUBLIC_URL, SMTP
@@ -96,7 +96,7 @@ Requires ports **80 and 443** open and the hostname pointed at this box. Visit
 ## 5. Day-to-day administration
 
 ```bash
-cd /opt/langtechdepot-sync
+cd /opt/langtechdepot
 sudo -u syncthing python3 register.py admin list              # who registered what
 sudo -u syncthing python3 register.py admin list --pending    # awaiting approval
 sudo -u syncthing python3 register.py admin approve <token>   # issue + email it

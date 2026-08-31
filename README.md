@@ -1,4 +1,4 @@
-# langtechdepot-sync
+# langtechdepot
 
 Distribution layer for the [LangTran software repository](https://lingtransoft.info/apps/langtran),
 built on [Syncthing](https://syncthing.net/) (open source, no licenses, actively
@@ -26,7 +26,7 @@ one would be visible to every other field user.
 
 ## Install
 
-**Windows** — right-click `client/setup-langtechdepot-sync.ps1` and choose **Run
+**Windows** — right-click `client/setup-langtechdepot.ps1` and choose **Run
 with PowerShell**. It installs Syncthing through winget; on a machine without
 winget, download Syncthing from <https://syncthing.net/downloads/> first and
 put `syncthing.exe` next to the script. (The script never downloads the
@@ -36,7 +36,7 @@ binary and then register it for startup.)
 **Linux**
 
 ```bash
-bash client/install-langtechdepot-sync.sh
+bash client/install-langtechdepot.sh
 ```
 
 No admin rights on either platform. The installer sets Syncthing to start
@@ -69,8 +69,8 @@ catalog shared. Administration is `register.py admin list|approve|revoke`.
 ## Repo layout
 
 ```text
-client/  setup-langtechdepot-sync.ps1     field installer (Windows)
-         install-langtechdepot-sync.sh    field installer (Linux)
+client/  setup-langtechdepot.ps1     field installer (Windows)
+         install-langtechdepot.sh    field installer (Linux)
          langtechdepot-subscribe.ps1|sh   CLI catalog list / subscribe
 server/  SETUP.md                    server standup guide
          register.py                 registration service + admin CLI

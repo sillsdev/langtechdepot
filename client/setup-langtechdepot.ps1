@@ -1,5 +1,5 @@
 <#
-LangTechDepot Sync installer (Windows).
+LangTechDepot installer (Windows).
 
 Installs Syncthing, registers this machine with the LangTechDepot server using the
 token you were issued, and leaves you at the folder catalog. Idempotent.
@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 
 $RegisterUrl = 'https://langtechdepot.lingtransoft.info'
 
-$HomeDir  = Join-Path $env:LOCALAPPDATA 'LangTechDepotSync\config'
+$HomeDir  = Join-Path $env:LOCALAPPDATA 'LangTechDepot\config'
 $DataRoot = Join-Path $env:USERPROFILE 'LangTechDepot'
 $GuiUrl   = 'http://127.0.0.1:8384'
 
@@ -52,7 +52,7 @@ $ApiKey = ([xml](Get-Content (Join-Path $HomeDir 'config.xml'))).configuration.g
 $Headers = @{ 'X-API-Key' = $ApiKey }
 
 # Start at logon through Task Scheduler - per-user, no service install, no admin.
-$TaskName = 'LangTechDepot Sync'
+$TaskName = 'LangTechDepot'
 $action  = New-ScheduledTaskAction -Execute $Exe -Argument "serve --no-console --no-browser --home `"$HomeDir`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `

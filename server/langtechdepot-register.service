@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 EnvironmentFile=/etc/langtechdepot/register.env
-ExecStart=/usr/bin/python3 /opt/langtechdepot-sync/register.py
+ExecStart=/usr/bin/python3 /opt/langtechdepot/register.py
 Restart=on-failure
 RestartSec=5
 

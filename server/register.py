@@ -242,7 +242,7 @@ def issue_token(email: str, person: str, org: str, location: str) -> tuple[str, 
         return token, False
     emailed = send_mail(
         email, "Your LangTechDepot access token",
-        f"Paste this token into the LangTechDepot Sync installer when it asks:\n\n    {token}\n\n"
+        f"Paste this token into the LangTechDepot installer when it asks:\n\n    {token}\n\n"
         "It works once, on one machine. Need another machine? Register again.\n",
     )
     return token, emailed
@@ -279,7 +279,7 @@ We&rsquo;ll issue you a token to paste into the installer.</p>
  <button type=submit>Request token</button>
 </form>
 <div class=note>Already have a token? Run the installer from
-<a href="https://github.com/sillsdev/langtechdepot-sync">github.com/sillsdev/langtechdepot-sync</a>
+<a href="https://github.com/sillsdev/langtechdepot">github.com/sillsdev/langtechdepot</a>
 and paste it when prompted.</div>"""
 
 
@@ -422,7 +422,7 @@ def admin(argv: list[str]) -> None:
             conn.execute("UPDATE tokens SET approved = 1 WHERE token = ?", (rest[0],))
             conn.commit()
             send_mail(row["email"], "Your LangTechDepot access token",
-                      f"Paste this token into the LangTechDepot Sync installer when it asks:\n\n"
+                      f"Paste this token into the LangTechDepot installer when it asks:\n\n"
                       f"    {rest[0]}\n\nIt works once, on one machine.\n")
             print(f"approved {row['email']}")
 

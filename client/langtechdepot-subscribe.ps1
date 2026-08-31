@@ -8,7 +8,7 @@ param([string]$FolderId)
 
 $ErrorActionPreference = 'Stop'
 $GuiUrl  = 'http://127.0.0.1:8384'
-$HomeDir = Join-Path $env:LOCALAPPDATA 'LangTechDepotSync\config'
+$HomeDir = Join-Path $env:LOCALAPPDATA 'LangTechDepot\config'
 $ApiKey  = ([xml](Get-Content (Join-Path $HomeDir 'config.xml'))).configuration.gui.apikey
 $Headers = @{ 'X-API-Key' = $ApiKey }
 
