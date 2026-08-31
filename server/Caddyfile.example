@@ -6,13 +6,13 @@
 #
 # Requires port 80 and 443 open to this host and the name below pointed at it.
 
-langtran.lingtransoft.info {
+langtechdepot.lingtransoft.info {
 	encode gzip
 
 	# The registration service binds to localhost only; Caddy is its TLS front.
 	reverse_proxy 127.0.0.1:8385
 
 	log {
-		output file /var/log/caddy/langtran.log
+		output file /var/log/caddy/langtechdepot.log
 	}
 }

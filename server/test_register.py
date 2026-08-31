@@ -8,7 +8,7 @@ import json, os, re, shutil, sqlite3, subprocess, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TMP = tempfile.mkdtemp(prefix="langtran-test-")
+TMP = tempfile.mkdtemp(prefix="langtechdepot-test-")
 REPO = HERE
 DB = os.path.join(TMP, "register.db")
 DEV = "P56IOI7-MZJNU2Y-IQGDREY-DM2MGTI-MGL3BXN-PQ6W5BM-TBBZ4TJ-XZWICQ2"
@@ -72,7 +72,7 @@ threading.Thread(target=fake.serve_forever, daemon=True).start()
 if os.path.exists(DB): os.remove(DB)
 env = {**os.environ, "SYNCTHING_URL": "http://127.0.0.1:18384", "SYNCTHING_API_KEY": "test",
        "DB_PATH": DB, "LISTEN_PORT": "18385", "AUTO_APPROVE": "true", "SMTP_HOST": "",
-       "SERVER_ADDRESS": "tcp://langtran.example.org:22000"}
+       "SERVER_ADDRESS": "tcp://langtechdepot.example.org:22000"}
 proc = subprocess.Popen([sys.executable, os.path.join(REPO, "register.py")], env=env,
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 B = "http://127.0.0.1:18385"
@@ -120,7 +120,7 @@ code, body = get(B + "/register", json.dumps({"token": token, "deviceID": DEV, "
 res = json.loads(body) if code == 200 else {}
 check("register succeeds", code == 200 and res.get("ok"), body)
 check("returns server device ID", res.get("serverDeviceID", "").startswith("SERVER1"))
-check("returns server address", "tcp://langtran.example.org:22000" in res.get("serverAddresses", []))
+check("returns server address", "tcp://langtechdepot.example.org:22000" in res.get("serverAddresses", []))
 check("returns both catalog folders", sorted(res.get("folders", [])) == ["software-core", "training-videos"])
 check("device added to syncthing", any(d["deviceID"] == DEV for d in state["devices"]))
 check("device name carries no token", all(token not in d.get("name", "") for d in state["devices"]))

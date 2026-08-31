@@ -1,17 +1,17 @@
 [Unit]
-Description=LangTran registration service
+Description=LangTechDepot registration service
 After=network-online.target syncthing@syncthing.service
 Wants=network-online.target
 
 [Service]
-EnvironmentFile=/etc/langtran/register.env
-ExecStart=/usr/bin/python3 /opt/langtran-sync/register.py
+EnvironmentFile=/etc/langtechdepot/register.env
+ExecStart=/usr/bin/python3 /opt/langtechdepot-sync/register.py
 Restart=on-failure
 RestartSec=5
 
 # Runs as the Syncthing owner so it can read config.xml for the API key.
 User=syncthing
-StateDirectory=langtran
+StateDirectory=langtechdepot
 
 # Only ever talks to localhost Syncthing and outbound SMTP; nothing here
 # needs to write outside its state directory.
@@ -19,7 +19,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/langtran
+ReadWritePaths=/var/lib/langtechdepot
 
 [Install]
 WantedBy=multi-user.target

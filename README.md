@@ -1,4 +1,4 @@
-# langtran-sync
+# langtechdepot-sync
 
 Distribution layer for the [LangTran software repository](https://lingtransoft.info/apps/langtran),
 built on [Syncthing](https://syncthing.net/) (open source, no licenses, actively
@@ -15,7 +15,7 @@ everyone else — the old btsync swarm, without the licensing.
 
 ## Getting access
 
-1. Register at **<https://langtran.lingtransoft.info>**. You get a token by
+1. Register at **<https://langtechdepot.lingtransoft.info>**. You get a token by
    email. It works once, on one machine — register again for a second machine.
 2. Run the installer for your platform (below) and paste the token when it asks.
 
@@ -26,7 +26,7 @@ one would be visible to every other field user.
 
 ## Install
 
-**Windows** — right-click `client/setup-langtran-sync.ps1` and choose **Run
+**Windows** — right-click `client/setup-langtechdepot-sync.ps1` and choose **Run
 with PowerShell**. It installs Syncthing through winget; on a machine without
 winget, download Syncthing from <https://syncthing.net/downloads/> first and
 put `syncthing.exe` next to the script. (The script never downloads the
@@ -36,16 +36,16 @@ binary and then register it for startup.)
 **Linux**
 
 ```bash
-bash client/install-langtran-sync.sh
+bash client/install-langtechdepot-sync.sh
 ```
 
 No admin rights on either platform. The installer sets Syncthing to start
 automatically, registers the machine, and opens the web GUI at
 <http://127.0.0.1:8384>. Within a minute or two the folder catalog appears as
 offers at the top — click **Add** on the ones you want. Files land under
-`~/LangTran/` (or `%USERPROFILE%\LangTran\`).
+`~/LangTechDepot/` (or `%USERPROFILE%\LangTechDepot\`).
 
-Prefer the command line? `langtran-subscribe.sh` / `langtran-subscribe.ps1`
+Prefer the command line? `langtechdepot-subscribe.sh` / `langtechdepot-subscribe.ps1`
 list the catalog and subscribe by folder ID.
 
 Folders are **receive-only** on your machine: if something local gets edited or
@@ -69,12 +69,12 @@ catalog shared. Administration is `register.py admin list|approve|revoke`.
 ## Repo layout
 
 ```text
-client/  setup-langtran-sync.ps1     field installer (Windows)
-         install-langtran-sync.sh    field installer (Linux)
-         langtran-subscribe.ps1|sh   CLI catalog list / subscribe
+client/  setup-langtechdepot-sync.ps1     field installer (Windows)
+         install-langtechdepot-sync.sh    field installer (Linux)
+         langtechdepot-subscribe.ps1|sh   CLI catalog list / subscribe
 server/  SETUP.md                    server standup guide
          register.py                 registration service + admin CLI
-         langtran-register.service   systemd unit
+         langtechdepot-register.service   systemd unit
          register.env.example        configuration template
          Caddyfile.example           TLS front end
 ```

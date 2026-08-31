@@ -1,7 +1,7 @@
 <#
-LangTran Sync installer (Windows).
+LangTechDepot Sync installer (Windows).
 
-Installs Syncthing, registers this machine with the LangTran server using the
+Installs Syncthing, registers this machine with the LangTechDepot server using the
 token you were issued, and leaves you at the folder catalog. Idempotent.
 
 Right-click this file and choose "Run with PowerShell".
@@ -11,10 +11,10 @@ No token yet? Register at the URL below and one is emailed to you.
 
 $ErrorActionPreference = 'Stop'
 
-$RegisterUrl = 'https://langtran.lingtransoft.info'
+$RegisterUrl = 'https://langtechdepot.lingtransoft.info'
 
-$HomeDir  = Join-Path $env:LOCALAPPDATA 'LangTranSync\config'
-$DataRoot = Join-Path $env:USERPROFILE 'LangTran'
+$HomeDir  = Join-Path $env:LOCALAPPDATA 'LangTechDepotSync\config'
+$DataRoot = Join-Path $env:USERPROFILE 'LangTechDepot'
 $GuiUrl   = 'http://127.0.0.1:8384'
 
 New-Item -ItemType Directory -Force $HomeDir, $DataRoot | Out-Null
@@ -52,7 +52,7 @@ $ApiKey = ([xml](Get-Content (Join-Path $HomeDir 'config.xml'))).configuration.g
 $Headers = @{ 'X-API-Key' = $ApiKey }
 
 # Start at logon through Task Scheduler - per-user, no service install, no admin.
-$TaskName = 'LangTran Sync'
+$TaskName = 'LangTechDepot Sync'
 $action  = New-ScheduledTaskAction -Execute $Exe -Argument "serve --no-console --no-browser --home `"$HomeDir`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
@@ -85,7 +85,7 @@ Write-Host ''
 
 $Registration = $null
 foreach ($attempt in 1..3) {
-    $token = (Read-Host 'Paste your LangTran token').Trim()
+    $token = (Read-Host 'Paste your LangTechDepot token').Trim()
     if (-not $token) { Write-Host 'Nothing entered.'; continue }
 
     $payload = @{ token = $token; deviceID = $MyId; deviceName = $DeviceName } | ConvertTo-Json
@@ -117,7 +117,7 @@ try {
     Invoke-RestMethod -Method Post "$GuiUrl/rest/config/devices" -Headers $Headers -ContentType 'application/json' `
         -Body (@{
             deviceID   = $Registration.serverDeviceID
-            name       = 'LangTran Server'
+            name       = 'LangTechDepot Server'
             addresses  = @($Registration.serverAddresses)
             introducer = $true
         } | ConvertTo-Json) | Out-Null

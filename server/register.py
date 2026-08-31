@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LangTran registration service.
+"""LangTechDepot registration service.
 
 Runs on the repository server beside Syncthing. It is the only way a field
 machine joins the cluster, and it exists because a Syncthing device name is
@@ -48,7 +48,7 @@ DEVICE_ID_RE = re.compile(r"^[A-Z2-7]{7}(-[A-Z2-7]{7}){7}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 SYNCTHING_URL = os.environ.get("SYNCTHING_URL", "http://127.0.0.1:8384").rstrip("/")
-DB_PATH = os.environ.get("DB_PATH", "/var/lib/langtran/register.db")
+DB_PATH = os.environ.get("DB_PATH", "/var/lib/langtechdepot/register.db")
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8385"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
@@ -59,7 +59,7 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
-MAIL_FROM = os.environ.get("MAIL_FROM", "langtran@sil.org")
+MAIL_FROM = os.environ.get("MAIL_FROM", "langtechdepot@sil.org")
 
 # Registration is cheap but not free: cap attempts per client address so a
 # script cannot mint tokens or grind at /register unbounded.
@@ -179,7 +179,7 @@ def register_device(token: str, device_id: str, device_name: str) -> dict:
     a user-safe message on any rejection."""
     if not DEVICE_ID_RE.match(device_id):
         raise ValueError("malformed device ID")
-    device_name = re.sub(r"[^\w .-]", "", device_name)[:64] or "langtran-client"
+    device_name = re.sub(r"[^\w .-]", "", device_name)[:64] or "langtechdepot-client"
 
     conn = db()
     try:
@@ -235,14 +235,14 @@ def issue_token(email: str, person: str, org: str, location: str) -> tuple[str, 
         conn.close()
 
     if ADMIN_EMAIL:
-        send_mail(ADMIN_EMAIL, "LangTran registration",
+        send_mail(ADMIN_EMAIL, "LangTechDepot registration",
                   f"{person or '(no name)'} <{email}>\norg: {org}\nlocation: {location}\n"
                   f"approved: {AUTO_APPROVE}\n")
     if not AUTO_APPROVE:
         return token, False
     emailed = send_mail(
-        email, "Your LangTran access token",
-        f"Paste this token into the LangTran Sync installer when it asks:\n\n    {token}\n\n"
+        email, "Your LangTechDepot access token",
+        f"Paste this token into the LangTechDepot Sync installer when it asks:\n\n    {token}\n\n"
         "It works once, on one machine. Need another machine? Register again.\n",
     )
     return token, emailed
@@ -252,7 +252,7 @@ def issue_token(email: str, person: str, org: str, location: str) -> tuple[str, 
 
 PAGE = """<!doctype html><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>LangTran &mdash; register</title>
+<title>LangTechDepot &mdash; register</title>
 <style>
  body{{font:16px/1.55 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem;color:#1a1a1a}}
  h1{{font-size:1.5rem;margin:0 0 .35rem}} p.sub{{color:#555;margin:0 0 1.75rem}}
@@ -267,7 +267,7 @@ PAGE = """<!doctype html><meta charset=utf-8>
 {body}
 """
 
-FORM = """<h1>LangTran access</h1>
+FORM = """<h1>LangTechDepot access</h1>
 <p class=sub>Register to sync SIL software and training material to your machine.
 We&rsquo;ll issue you a token to paste into the installer.</p>
 <form method=post action=/request>
@@ -279,12 +279,12 @@ We&rsquo;ll issue you a token to paste into the installer.</p>
  <button type=submit>Request token</button>
 </form>
 <div class=note>Already have a token? Run the installer from
-<a href="https://github.com/sillsdev/langtran-sync">github.com/sillsdev/langtran-sync</a>
+<a href="https://github.com/sillsdev/langtechdepot-sync">github.com/sillsdev/langtechdepot-sync</a>
 and paste it when prompted.</div>"""
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "langtran-register"
+    server_version = "langtechdepot-register"
 
     def log_message(self, fmt, *args):
         print(f"[http] {self.address_string()} {fmt % args}", flush=True)
@@ -421,8 +421,8 @@ def admin(argv: list[str]) -> None:
                 sys.exit("no such token")
             conn.execute("UPDATE tokens SET approved = 1 WHERE token = ?", (rest[0],))
             conn.commit()
-            send_mail(row["email"], "Your LangTran access token",
-                      f"Paste this token into the LangTran Sync installer when it asks:\n\n"
+            send_mail(row["email"], "Your LangTechDepot access token",
+                      f"Paste this token into the LangTechDepot Sync installer when it asks:\n\n"
                       f"    {rest[0]}\n\nIt works once, on one machine.\n")
             print(f"approved {row['email']}")
 

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# LangTran Sync installer (Linux).
+# LangTechDepot Sync installer (Linux).
 #
-# Installs Syncthing, registers this machine with the LangTran server using the
+# Installs Syncthing, registers this machine with the LangTechDepot server using the
 # token you were issued, and leaves you at the folder catalog. Idempotent.
 # Needs: curl, tar, python3, systemd user session.
 #
-#   bash install-langtran-sync.sh
+#   bash install-langtechdepot-sync.sh
 #
 # No token yet? Register at the URL below and one is emailed to you.
 
 set -euo pipefail
 
-REGISTER_URL='https://langtran.lingtransoft.info'
+REGISTER_URL='https://langtechdepot.lingtransoft.info'
 
-DATA_ROOT="$HOME/LangTran"
+DATA_ROOT="$HOME/LangTechDepot"
 GUI_URL='http://127.0.0.1:8384'
 BIN="$HOME/.local/bin/syncthing"
 
@@ -43,9 +43,9 @@ CONFIG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/syncthing"
 
 # Per-user unit: no root needed, and lingering keeps it syncing when logged out.
 mkdir -p "$HOME/.config/systemd/user"
-cat > "$HOME/.config/systemd/user/langtran-sync.service" <<EOF
+cat > "$HOME/.config/systemd/user/langtechdepot-sync.service" <<EOF
 [Unit]
-Description=LangTran Sync (Syncthing)
+Description=LangTechDepot Sync (Syncthing)
 After=network.target
 
 [Service]
@@ -56,7 +56,7 @@ Restart=on-failure
 WantedBy=default.target
 EOF
 systemctl --user daemon-reload
-systemctl --user enable --now langtran-sync.service
+systemctl --user enable --now langtechdepot-sync.service
 loginctl enable-linger "$USER" 2>/dev/null || true
 
 API_KEY=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$CONFIG_DIR/config.xml').find('./gui/apikey').text)")
@@ -84,7 +84,7 @@ echo
 
 RESPONSE=''
 for attempt in 1 2 3; do
-    read -r -p 'Paste your LangTran token: ' TOKEN
+    read -r -p 'Paste your LangTechDepot token: ' TOKEN
     TOKEN=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
     [ -n "$TOKEN" ] || { echo 'Nothing entered.'; continue; }
 
@@ -118,7 +118,7 @@ SERVER_ADDRS=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json
 # swarm with each other instead of every download crossing the ocean.
 api POST /rest/config/devices "{
   \"deviceID\": \"$SERVER_ID\",
-  \"name\": \"LangTran Server\",
+  \"name\": \"LangTechDepot Server\",
   \"addresses\": $SERVER_ADDRS,
   \"introducer\": true
 }" >/dev/null 2>&1 || true
@@ -131,5 +131,5 @@ echo 'Registered.'
 echo "Sync data root: $DATA_ROOT"
 echo 'The folder catalog will appear within a minute or two.'
 echo "Open $GUI_URL and click Add on the folders you want,"
-echo 'or run: ./langtran-subscribe.sh            (list what is on offer)'
-echo '        ./langtran-subscribe.sh <folder>   (subscribe to one)'
+echo 'or run: ./langtechdepot-subscribe.sh            (list what is on offer)'
+echo '        ./langtechdepot-subscribe.sh <folder>   (subscribe to one)'

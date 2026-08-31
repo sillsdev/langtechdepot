@@ -1,14 +1,14 @@
 <#
-List the LangTran folder catalog, or subscribe to one folder.
+List the LangTechDepot folder catalog, or subscribe to one folder.
 
-  .\langtran-subscribe.ps1               # list folders on offer
-  .\langtran-subscribe.ps1 <folder-id>   # subscribe (receive-only)
+  .\langtechdepot-subscribe.ps1               # list folders on offer
+  .\langtechdepot-subscribe.ps1 <folder-id>   # subscribe (receive-only)
 #>
 param([string]$FolderId)
 
 $ErrorActionPreference = 'Stop'
 $GuiUrl  = 'http://127.0.0.1:8384'
-$HomeDir = Join-Path $env:LOCALAPPDATA 'LangTranSync\config'
+$HomeDir = Join-Path $env:LOCALAPPDATA 'LangTechDepotSync\config'
 $ApiKey  = ([xml](Get-Content (Join-Path $HomeDir 'config.xml'))).configuration.gui.apikey
 $Headers = @{ 'X-API-Key' = $ApiKey }
 
@@ -39,7 +39,7 @@ $tpl = Api Get '/rest/config/defaults/folder'
 $offer = $pending.$FolderId.offeredBy
 $label = ($offer.PSObject.Properties.Value | Select-Object -First 1).label
 if (-not $label) { $label = $FolderId }
-$root = if ($tpl.path) { $tpl.path } else { Join-Path $env:USERPROFILE 'LangTran' }
+$root = if ($tpl.path) { $tpl.path } else { Join-Path $env:USERPROFILE 'LangTechDepot' }
 
 $tpl.id = $FolderId
 $tpl.label = $label

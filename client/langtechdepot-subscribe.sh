@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# List the LangTran folder catalog, or subscribe to one folder.
+# List the LangTechDepot folder catalog, or subscribe to one folder.
 #
-#   ./langtran-subscribe.sh              # list folders on offer
-#   ./langtran-subscribe.sh <folder-id>  # subscribe (receive-only)
+#   ./langtechdepot-subscribe.sh              # list folders on offer
+#   ./langtechdepot-subscribe.sh <folder-id>  # subscribe (receive-only)
 
 set -euo pipefail
 GUI_URL='http://127.0.0.1:8384'
@@ -47,7 +47,7 @@ label = next(iter(offer.values())).get("label") or fid
 tpl.update({
     "id": fid,
     "label": label,
-    "path": os.path.join(tpl.get("path") or os.path.expanduser("~/LangTran"), fid),
+    "path": os.path.join(tpl.get("path") or os.path.expanduser("~/LangTechDepot"), fid),
     # share with every device offering it (the server, plus introduced peers)
     "devices": [{"deviceID": d} for d in offer],
 })

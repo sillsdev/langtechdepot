@@ -1,4 +1,4 @@
-# LangTran Server Setup (California repository server)
+# LangTechDepot Server Setup (California repository server)
 
 One-time standup. Resilio can keep running alongside; the two ignore each other
 once the `.stignore` entries below are in place.
@@ -32,7 +32,7 @@ One Syncthing folder per subscription group, pointed at the **existing** repo
 directories (no data migration). For each folder in the GUI:
 
 - **Folder ID**: short stable slug (`software-core`, `training-videos`, ...).
-  This is what users see and what `langtran-subscribe` takes as an argument.
+  This is what users see and what `langtechdepot-subscribe` takes as an argument.
   Never change an ID once published.
 - **Folder Path**: the existing directory.
 - **Folder Type**: **Send Only**.
@@ -61,16 +61,16 @@ minute.
 This is how field machines join. Nothing else admits a device.
 
 ```bash
-sudo mkdir -p /opt/langtran-sync /etc/langtran
-sudo cp register.py /opt/langtran-sync/
-sudo cp register.env.example /etc/langtran/register.env
-sudo chmod 600 /etc/langtran/register.env
-sudo $EDITOR /etc/langtran/register.env    # API key, SERVER_ADDRESS, PUBLIC_URL, SMTP
+sudo mkdir -p /opt/langtechdepot-sync /etc/langtechdepot
+sudo cp register.py /opt/langtechdepot-sync/
+sudo cp register.env.example /etc/langtechdepot/register.env
+sudo chmod 600 /etc/langtechdepot/register.env
+sudo $EDITOR /etc/langtechdepot/register.env    # API key, SERVER_ADDRESS, PUBLIC_URL, SMTP
 
-sudo cp langtran-register.service /etc/systemd/system/
+sudo cp langtechdepot-register.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now langtran-register
-journalctl -u langtran-register -f
+sudo systemctl enable --now langtechdepot-register
+journalctl -u langtechdepot-register -f
 ```
 
 Without `SMTP_HOST` the form shows the token on screen instead of mailing it —
@@ -96,7 +96,7 @@ Requires ports **80 and 443** open and the hostname pointed at this box. Visit
 ## 5. Day-to-day administration
 
 ```bash
-cd /opt/langtran-sync
+cd /opt/langtechdepot-sync
 sudo -u syncthing python3 register.py admin list              # who registered what
 sudo -u syncthing python3 register.py admin list --pending    # awaiting approval
 sudo -u syncthing python3 register.py admin approve <token>   # issue + email it
