@@ -1,6 +1,6 @@
 # langtechdepot
 
-Distribution layer for the [LangTran software repository](https://lingtransoft.info/apps/langtran),
+Distribution layer for the [LangTechDepot software repository](https://lingtransoft.info/apps/LangTechDepot),
 built on [Syncthing](https://syncthing.net/) (open source, no licenses, actively
 developed). Replaces Resilio Sync.
 
@@ -15,7 +15,7 @@ everyone else — the old btsync swarm, without the licensing.
 
 ## Getting access
 
-1. Register at **<https://langtechdepot.lingtransoft.info>**. You get a token by
+1. Register at **<https://depot.langtech.cloud>**. You get a token by
    email. It works once, on one machine — register again for a second machine.
 2. Run the installer for your platform (below) and paste the token when it asks.
 
