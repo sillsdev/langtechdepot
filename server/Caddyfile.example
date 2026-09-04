@@ -6,13 +6,23 @@
 #
 # Requires port 80 and 443 open to this host and the name below pointed at it.
 
-langtechdepot.lingtransoft.info {
-	encode gzip
+depot.langtech.cloud {
+    encode gzip
 
-	# The registration service binds to localhost only; Caddy is its TLS front.
-	reverse_proxy 127.0.0.1:8385
+    # 1. Route the "/files" path to our software download tree
+    handle_path /files* {
+    root * /data/LT/Groups
+    file_server browse
+    }
+}
 
-	log {
-		output file /var/log/caddy/langtechdepot.log
-	}
+# 2. Route absolutely everything else to our register.py script
+handle {
+    # The registration service binds to localhost only; Caddy is its TLS front.
+    reverse_proxy localhost:8385
+
+    log {
+	output file /var/log/caddy/langtechdepot.log
+    }
+
 }
