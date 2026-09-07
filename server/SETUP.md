@@ -113,6 +113,7 @@ Caddy terminates TLS and renews the certificate on its own:
 sudo apt install caddy
 sudo cp Caddyfile.example /etc/caddy/Caddyfile
 sudo $EDITOR /etc/caddy/Caddyfile          # set the real hostname
+caddy validate --config /etc/caddy/Caddyfile # fix any errors
 sudo systemctl reload caddy
 ```
 
