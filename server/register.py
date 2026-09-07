@@ -42,6 +42,11 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
+from dotenv import load_dotenv
+
+# Load the file directly if it exists (ignores it if it doesn't)
+load_dotenv('/etc/langtechdepot/register.env')
 
 # Canonical Syncthing device ID: 8 dash-separated groups of 7 base32 chars.
 DEVICE_ID_RE = re.compile(r"^[A-Z2-7]{7}(-[A-Z2-7]{7}){7}$")
