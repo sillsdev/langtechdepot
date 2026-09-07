@@ -90,8 +90,9 @@ This is how field machines join. Nothing else admits a device.
 sudo mkdir -p /opt/langtechdepot /etc/langtechdepot
 sudo cp register.py /opt/langtechdepot/
 sudo cp register.env.example /etc/langtechdepot/register.env
-sudo chmod 600 /etc/langtechdepot/register.env
-sudo $EDITOR /etc/langtechdepot/register.env    # API key, SERVER_ADDRESS, PUBLIC_URL, SMTP
+sudo chgrp syncthing !$	# so register.py can read env
+sudo chmod 640 !$
+sudo $EDITOR !$    # API key, SERVER_ADDRESS, PUBLIC_URL, SMTP
 
 sudo cp langtechdepot-register.service /etc/systemd/system/
 sudo systemctl daemon-reload
