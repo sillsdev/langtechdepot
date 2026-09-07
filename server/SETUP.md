@@ -87,6 +87,7 @@ minute.
 This is how field machines join. Nothing else admits a device.
 
 ```bash
+sudo apt update && sudo apt install -y python3-dotenv
 sudo mkdir -p /opt/langtechdepot /etc/langtechdepot
 sudo cp register.py /opt/langtechdepot/
 sudo cp register.env.example /etc/langtechdepot/register.env
