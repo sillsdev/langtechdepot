@@ -11,7 +11,7 @@ No token yet? Register at the URL below and one is emailed to you.
 
 $ErrorActionPreference = 'Stop'
 
-$RegisterUrl = 'https://langtechdepot.lingtransoft.info'
+$RegisterUrl = 'https://depot.langtech.cloud'
 
 $HomeDir  = Join-Path $env:LOCALAPPDATA 'LangTechDepot\config'
 $DataRoot = Join-Path $env:USERPROFILE 'LangTechDepot'
