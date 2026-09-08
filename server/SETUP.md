@@ -21,7 +21,7 @@ The GUI stays bound to `127.0.0.1:8384`. Administer over a remote desktop or an 
 On first login, go to Settings/GUI and set a GUI username and password.
 
 In the firewall, open **TCP+UDP 22000** to this host.
-Ask the person who manages DNS to give this server a stable DNS name,
+Ask the person who manages our DNS to give this server a stable DNS name,
 such as depot.langtech.cloud — clients receive that address at registration.
 
 You never need to copy the server's device ID anywhere: the registration
@@ -56,12 +56,13 @@ So that SyncThing can create `.stfolder` inside the folders to be shared, change
 cd /data/LT/BTSync
 sudo chgrp -R syncthing .* *
 ```
-So that you can make changes in the files to be shared with syncthing, your login account needs to be listed in the group called *syncthing*, with these commands:
-```
+So that you and the user *ltadmin* can make changes in the files to be shared with syncthing, 
+both login accounts need to be listed in the group called *syncthing*, with these commands:
+```bash
+sudo usermod -aG syncthing ltadmin
 sudo usermod -aG syncthing $USER
 newgrp syncthing
 ```
-
 ## 3. Create the folder catalog
 
 One Syncthing folder per subscription group, pointed at the **existing** repo
@@ -91,7 +92,7 @@ sudo apt update && sudo apt install -y python3-dotenv
 sudo mkdir -p /opt/langtechdepot /etc/langtechdepot
 sudo cp register.py /opt/langtechdepot/
 sudo cp register.env.example /etc/langtechdepot/register.env
-sudo chgrp syncthing !$	# so register.py can read env
+sudo chgrp syncthing !$	  # so register.py can read env
 sudo chmod 640 !$
 sudo $EDITOR !$    # API key, SERVER_ADDRESS, PUBLIC_URL, SMTP
 
