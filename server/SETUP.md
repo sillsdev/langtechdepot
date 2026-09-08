@@ -119,7 +119,7 @@ So that the clients' tokens can be backed up,
 make sure that the backup script will put them in the right place.
 ``` bash
 $EDITOR token_backup.sh	# check BACKUP_DIR etc
-chmod +x !$
+chmod ug+x !$
 ln !$ /usr/local/bin
 BACKUP_DIR=/data/LT/Backup/ClientsHowto	# or wherever you put it
 sudo mkdir -p $BACKUP_DIR
