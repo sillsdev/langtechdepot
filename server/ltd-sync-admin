@@ -8,4 +8,4 @@
 # The "$@" will add any arguments to the register.py command's args.
 #
 DIR=/opt/langtechdepot
-python3 $DIR/register.py admin "$@"
+sudo python3 $DIR/register.py admin "$@"
