@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# ltd-sync-admin -- Runs python script registry.py to control our syncing.
+#
+# No need to run this as root, provided the admin person
+# is a member of the group "syncthing"
+#
+# The "$@" will add any arguments to the register.py command's args.
+#
+DIR=/opt/langtechdepot
+python3 $DIR/register.py admin "$@"
