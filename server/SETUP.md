@@ -112,7 +112,8 @@ make sure that the backup script will put them in the right place.
 $EDITOR token_backup.sh	# check BACKUP_DIR etc
 chmod +x !$
 ln !$ /usr/local/bin
-BACKUP_DIR=/data/LT/Backup/ClientsHowto
+BACKUP_DIR=/data/LT/Backup/ClientsHowto	# or wherever you put it
+sudo mkdir -p $BACKUP_DIR
 ls -lrt $BACKUP_DIR
 token_backup.sh
 ls -lrt $BACKUP_DIR
@@ -147,8 +148,8 @@ So that the tree of folders can be displayed
 as well as sync tokens provided,
 the Caddyfile sets up this arrangement:
 
-depot.langtech.cloud gives out tokens
-depot.langtech.cloud/files displays the folders for downloading a single installer.
+depot.langtech.cloud *gives out tokens*
+depot.langtech.cloud/files *displays folders for gettinga single installer*
 
 Requires ports **80 and 443** open and the hostname pointed at this box. Visit
 `https://<hostname>/` — you should get the registration form. Put that URL into
@@ -162,11 +163,10 @@ sudo systemctl disable apache2
 ## 6. Day-to-day administration
 
 ```bash
-cd /opt/langtechdepot
-sudo -u syncthing python3 register.py admin list              # who registered what
-sudo -u syncthing python3 register.py admin list --pending    # awaiting approval
-sudo -u syncthing python3 register.py admin approve <token>   # issue + email it
-sudo -u syncthing python3 register.py admin revoke <email>    # cut a machine off
+ltd-sync-admin list              # who registered what
+ltd-sync-admin list --pending    # awaiting approval
+ltd-sync-admin approve <token>   # issue + email it
+ltd-sync-admin revoke <email>    # cut a machine off
 ```
 
 `revoke` removes the device from Syncthing, which is what actually ends access;
