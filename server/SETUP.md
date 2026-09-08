@@ -119,6 +119,16 @@ ls -lrt $BACKUP_DIR
 ```
 You should see a new file like register_yyyy-mm-dd_hhmmss.db
 
+Now add a cron line so the backup script runs at 1:30 AM daily.
+Copy this line to the clipboard:
+```
+30 1 * * * /usr/local/bin/token_backup.sh >/dev/null 2>&1
+```
+Then edit the crontab file for root and paste at the end.
+``` bash
+sudo crontab -e
+```
+
 ## 5. Put TLS in front
 
 The service binds to localhost only. 
