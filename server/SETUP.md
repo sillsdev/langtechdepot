@@ -106,6 +106,15 @@ Without `SMTP_HOST` the form shows the token on screen instead of mailing it —
 usable, but set SMTP if you want a working address on file for each registrant.
 Set `AUTO_APPROVE=false` to queue requests for manual approval instead.
 
+Edit the management script, to make sure it has the right folder,
+the place to which you copied register.py,
+then enable the script:
+``` bash
+$EDITOR ltd-sync-admin	# check folder of register.py
+chmod ug+x !$
+ln !$ /usr/local/bin
+```
+
 So that the clients' tokens can be backed up,
 make sure that the backup script will put them in the right place.
 ``` bash
