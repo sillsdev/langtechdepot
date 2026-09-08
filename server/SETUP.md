@@ -106,6 +106,19 @@ Without `SMTP_HOST` the form shows the token on screen instead of mailing it —
 usable, but set SMTP if you want a working address on file for each registrant.
 Set `AUTO_APPROVE=false` to queue requests for manual approval instead.
 
+So that the clients' tokens can be backed up,
+make sure that the backup script will put them in the right place.
+``` bash
+$EDITOR token_backup.sh	# check BACKUP_DIR etc
+chmod +x !$
+ln !$ /usr/local/bin
+BACKUP_DIR=/data/LT/Backup/ClientsHowto
+ls -lrt $BACKUP_DIR
+token_backup.sh
+ls -lrt $BACKUP_DIR
+```
+You should see a new file like register_yyyy-mm-dd_hhmmss.db
+
 ## 5. Put TLS in front
 
 The service binds to localhost only. 
