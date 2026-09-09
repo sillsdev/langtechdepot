@@ -1,51 +1,179 @@
 <#
-List the LangTechDepot folder catalog, or subscribe to one folder.
+Subscribe to LangTechDepot folders, or just see what is on offer.
 
-  .\langtechdepot-subscribe.ps1               # list folders on offer
-  .\langtechdepot-subscribe.ps1 <folder-id>   # subscribe (receive-only)
+Right-click this file and choose "Run with PowerShell" to list the catalog and
+pick folders one at a time. From a PowerShell prompt you can also name one
+directly:
+
+  .\langtechdepot-subscribe.ps1               # list, then pick interactively
+  .\langtechdepot-subscribe.ps1 <folder-id>   # subscribe to one (receive-only)
+
+No token is needed here. The token is used once, by setup-langtechdepot.ps1,
+to join this machine to the cluster. After that the server offers folders and
+this script accepts them. If you have not run the installer yet, run it first.
 #>
-param([string]$FolderId)
+
+param(
+    [string]$FolderId,
+    # Skip the "Press Enter to close" pause. For unattended runs only.
+    [switch]$NoPause
+)
 
 $ErrorActionPreference = 'Stop'
-$GuiUrl  = 'http://127.0.0.1:8384'
-$HomeDir = Join-Path $env:LOCALAPPDATA 'LangTechDepot\config'
-$ApiKey  = ([xml](Get-Content (Join-Path $HomeDir 'config.xml'))).configuration.gui.apikey
-$Headers = @{ 'X-API-Key' = $ApiKey }
+$GuiUrl = 'http://127.0.0.1:8384'
 
-function Api($Method, $Path, $Body) {
-    $args = @{ Method = $Method; Uri = "$GuiUrl$Path"; Headers = $Headers; ContentType = 'application/json' }
-    if ($null -ne $Body) { $args.Body = ($Body | ConvertTo-Json -Depth 10) }
-    Invoke-RestMethod @args
+function Wait-BeforeClosing {
+    if ($NoPause) { return }
+    Write-Host ''
+    Read-Host 'Press Enter to close this window' | Out-Null
 }
 
-$pending = Api Get '/rest/cluster/pending/folders'
-$pendingIds = @(if ($pending) { $pending.PSObject.Properties.Name })
-$have = @(Api Get '/rest/config/folders' | ForEach-Object id)
+# Right-click "Run with PowerShell" closes the console the instant the script
+# ends, so without this an error is on screen for a few milliseconds and then
+# gone.
+trap {
+    Write-Host ''
+    Write-Host 'Could not finish:' -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    Wait-BeforeClosing
+    exit 1
+}
 
-if (-not $FolderId) {
-    if (-not $pendingIds -and -not $have) { Write-Host 'Nothing on offer yet — give the server a minute after install.' }
-    foreach ($fid in $pendingIds | Sort-Object) {
-        $label = ($pending.$fid.offeredBy.PSObject.Properties.Value | Select-Object -First 1).label
-        Write-Host ("  {0,-24} {1}" -f $fid, $label)
+# The installer gives Syncthing its own home, so a field machine can still run
+# a personal Syncthing alongside. Fall back to the standard locations for a
+# machine where Syncthing was installed by hand.
+function Get-SyncthingConfig {
+    $candidates = @(
+        Join-Path $env:LOCALAPPDATA 'LangTechDepot\config\config.xml'
+        Join-Path $env:LOCALAPPDATA 'Syncthing\config.xml'
+        Join-Path $env:APPDATA 'Syncthing\config.xml'
+    )
+    foreach ($path in $candidates) {
+        if (Test-Path $path) {
+            return [pscustomobject]@{
+                Path = $path
+                Key  = ([xml](Get-Content $path)).configuration.gui.apikey
+            }
+        }
     }
-    foreach ($fid in $have | Sort-Object) { Write-Host ("  {0,-24} (already subscribed)" -f $fid) }
+    throw ("no Syncthing configuration on this machine, so there is nothing to " +
+           "subscribe to yet. Run setup-langtechdepot.ps1 first - that is where your " +
+           "token goes. Looked in:" + [Environment]::NewLine + "    " +
+           ($candidates -join ([Environment]::NewLine + "    ")))
+}
+
+$Config  = Get-SyncthingConfig
+$Headers = @{ 'X-API-Key' = $Config.Key }
+
+function Api($Method, $Path, $Body) {
+    $req = @{ Method = $Method; Uri = "$GuiUrl$Path"; Headers = $Headers; ContentType = 'application/json' }
+    if ($null -ne $Body) { $req.Body = ($Body | ConvertTo-Json -Depth 10) }
+    try {
+        Invoke-RestMethod @req
+    } catch {
+        $status = $null
+        if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+        if ($status -eq 403 -or $status -eq 401) {
+            throw ("the Syncthing answering on $GuiUrl is not the LangTechDepot one - it " +
+                   "rejected our API key. Another Syncthing is probably already running and " +
+                   "holding that port. Close it, then start the LangTechDepot task from Task " +
+                   "Scheduler, or just log out and back in.")
+        }
+        if ($null -eq $status) {
+            throw ("nothing is answering at $GuiUrl. Syncthing is not running. Log out and " +
+                   "back in to start it, or re-run setup-langtechdepot.ps1. (Config in use: " +
+                   "$($Config.Path))")
+        }
+        throw $_
+    }
+}
+
+function Get-Catalog {
+    $pending = Api Get '/rest/cluster/pending/folders'
+    [pscustomobject]@{
+        Pending    = $pending
+        PendingIds = @(if ($pending) { $pending.PSObject.Properties.Name })
+        # { $_.id }, not the "ForEach-Object id" shorthand: with a function call
+        # upstream the shorthand binds the wrong parameter set and yields one
+        # empty element, which silently emptied this list.
+        Have       = @(Api Get '/rest/config/folders' | ForEach-Object { $_.id })
+    }
+}
+
+function Get-OfferLabel($Catalog, $Id) {
+    $label = ($Catalog.Pending.$Id.offeredBy.PSObject.Properties.Value | Select-Object -First 1).label
+    if ($label) { $label } else { $Id }
+}
+
+function Show-Catalog($Catalog) {
+    if (-not $Catalog.PendingIds -and -not $Catalog.Have) {
+        Write-Host 'Nothing on offer yet. The catalog takes a minute or two to arrive after'
+        Write-Host 'you register - wait a moment and run this again.'
+        return
+    }
+    if ($Catalog.PendingIds) {
+        Write-Host ''
+        Write-Host 'Available to subscribe:'
+        foreach ($fid in $Catalog.PendingIds | Sort-Object) {
+            Write-Host ("  {0,-24} {1}" -f $fid, (Get-OfferLabel $Catalog $fid))
+        }
+    }
+    if ($Catalog.Have) {
+        Write-Host ''
+        Write-Host 'Already subscribed:'
+        foreach ($fid in $Catalog.Have | Sort-Object) { Write-Host ("  {0,-24}" -f $fid) }
+    }
+}
+
+function Add-Subscription($Catalog, $Id) {
+    $tpl = Api Get '/rest/config/defaults/folder'
+    $offer = $Catalog.Pending.$Id.offeredBy
+    $root = if ($tpl.path) { $tpl.path } else { Join-Path $env:USERPROFILE 'LangTechDepot' }
+
+    $tpl.id = $Id
+    $tpl.label = Get-OfferLabel $Catalog $Id
+    $tpl.path = Join-Path $root $Id
+    # share with every device offering it (the server, plus introduced peers)
+    $tpl.devices = @($offer.PSObject.Properties.Name | ForEach-Object { @{ deviceID = $_ } })
+
+    Api Post '/rest/config/folders' $tpl | Out-Null
+    Write-Host "subscribed to $Id -> $($tpl.path) (receive-only)"
+}
+
+$catalog = Get-Catalog
+
+# Named on the command line: subscribe to that one and stop.
+if ($FolderId) {
+    if ($catalog.Have -contains $FolderId) { throw "already subscribed to $FolderId" }
+    if ($catalog.PendingIds -notcontains $FolderId) {
+        throw "$FolderId is not on offer (run without arguments to list what is)"
+    }
+    Add-Subscription $catalog $FolderId
+    Wait-BeforeClosing
     exit 0
 }
 
-if ($have -contains $FolderId) { throw "already subscribed to $FolderId" }
-if ($pendingIds -notcontains $FolderId) { throw "$FolderId is not on offer (run without arguments to list)" }
+# No argument - the right-click case. List, then let them pick, because
+# right-click gives no way to pass a folder ID.
+Show-Catalog $catalog
+while ($catalog.PendingIds) {
+    Write-Host ''
+    $choice = (Read-Host 'Folder to subscribe to (Enter to finish)').Trim()
+    if (-not $choice) { break }
+    if ($catalog.Have -contains $choice) {
+        Write-Host "Already subscribed to $choice."
+        continue
+    }
+    if ($catalog.PendingIds -notcontains $choice) {
+        Write-Host "No folder called '$choice' on offer. Copy one of the IDs listed above."
+        continue
+    }
+    Add-Subscription $catalog $choice
+    $catalog = Get-Catalog
+    Show-Catalog $catalog
+}
 
-$tpl = Api Get '/rest/config/defaults/folder'
-$offer = $pending.$FolderId.offeredBy
-$label = ($offer.PSObject.Properties.Value | Select-Object -First 1).label
-if (-not $label) { $label = $FolderId }
-$root = if ($tpl.path) { $tpl.path } else { Join-Path $env:USERPROFILE 'LangTechDepot' }
-
-$tpl.id = $FolderId
-$tpl.label = $label
-$tpl.path = Join-Path $root $FolderId
-# share with every device offering it (the server, plus introduced peers)
-$tpl.devices = @($offer.PSObject.Properties.Name | ForEach-Object { @{ deviceID = $_ } })
-
-Api Post '/rest/config/folders' $tpl | Out-Null
-Write-Host "subscribed to $FolderId -> $($tpl.path) (receive-only)"
+Write-Host ''
+Write-Host 'Files arrive under' (Join-Path $env:USERPROFILE 'LangTechDepot')
+Write-Host "Progress is on the Syncthing page at $GuiUrl"
+Wait-BeforeClosing
