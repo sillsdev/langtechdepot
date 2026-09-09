@@ -129,10 +129,21 @@ Start-ScheduledTask -TaskName $TaskName
 
 Write-Host 'Waiting for Syncthing...'
 $deadline = (Get-Date).AddSeconds(60)
+$lastStatus = $null
 while ($true) {
     try { Invoke-RestMethod "$GuiUrl/rest/system/status" -Headers $Headers | Out-Null; break }
     catch {
-        if ((Get-Date) -gt $deadline) { throw 'Syncthing did not start within 60s.' }
+        if ($_.Exception.Response) { $lastStatus = [int]$_.Exception.Response.StatusCode }
+        if ((Get-Date) -gt $deadline) {
+            # A Syncthing started by hand holds the same port and answers with a
+            # different API key, which looks nothing like "did not start".
+            if ($lastStatus -eq 401 -or $lastStatus -eq 403) {
+                throw ("another Syncthing already has $GuiUrl and it is not this one - it " +
+                       "rejected our API key. Close that Syncthing (look in the system tray, " +
+                       "or the console window you started it from) and run this script again.")
+            }
+            throw 'Syncthing did not start within 60s.'
+        }
         Start-Sleep 2
     }
 }
