@@ -14,7 +14,6 @@ set -euo pipefail
 REGISTER_URL='https://depot.langtech.cloud'
 
 DATA_ROOT="$HOME/LangTechDepot"
-GUI_URL='http://127.0.0.1:8384'
 BIN="$HOME/.local/bin/syncthing"
 
 mkdir -p "$DATA_ROOT" "$HOME/.local/bin"
@@ -38,11 +37,22 @@ elif ! [ -x "$BIN" ]; then
 fi
 echo "Using Syncthing at $BIN"
 
-CONFIG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/syncthing"
+# Pinned with --home rather than left to Syncthing's default, which is not a
+# fixed path: Syncthing uses $XDG_CONFIG_HOME/syncthing or ~/.config/syncthing
+# when a config.xml already exists in either, and only otherwise falls back to
+# the state dir this used to assume. So any machine that has run Syncthing
+# before keeps its config where this script would not look, and builds before
+# 1.27 (Debian 12 packages 1.23) use ~/.config/syncthing even when fresh -
+# either way the API key read below died on a missing file. setup-langtechdepot.ps1
+# passes --home on Windows for the same reason.
+STATE_HOME="$HOME/.local/state"
+case "${XDG_STATE_HOME:-}" in /*) STATE_HOME="$XDG_STATE_HOME";; esac  # Syncthing ignores a relative one
+CONFIG_DIR="$STATE_HOME/langtechdepot"
+
 # No --no-default-folder: Syncthing 2.0 removed that flag along with the
 # "Default Folder" it used to suppress, so passing it is a hard error
 # ("unknown flag --no-default-folder") and nothing is left to suppress.
-[ -f "$CONFIG_DIR/config.xml" ] || "$BIN" generate >/dev/null
+[ -f "$CONFIG_DIR/config.xml" ] || "$BIN" generate --home "$CONFIG_DIR" >/dev/null
 
 # Per-user unit: no root needed, and lingering keeps it syncing when logged out.
 mkdir -p "$HOME/.config/systemd/user"
@@ -52,7 +62,7 @@ Description=LangTechDepot (Syncthing)
 After=network.target
 
 [Service]
-ExecStart=$BIN serve --no-browser
+ExecStart=$BIN serve --no-browser --home "$CONFIG_DIR"
 Restart=on-failure
 
 [Install]
@@ -62,7 +72,18 @@ systemctl --user daemon-reload
 systemctl --user enable --now langtechdepot.service
 loginctl enable-linger "$USER" 2>/dev/null || true
 
-API_KEY=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$CONFIG_DIR/config.xml').find('./gui/apikey').text)")
+# Path passed as an argument, not interpolated into the Python source: it now
+# derives from XDG_STATE_HOME, and a backslash or quote in there would
+# otherwise be read as Python rather than as a path.
+xmlget() { python3 -c "import sys,xml.etree.ElementTree as ET; print(ET.parse(sys.argv[1]).find(sys.argv[2]).text)" "$CONFIG_DIR/config.xml" "$1"; }
+
+API_KEY=$(xmlget ./gui/apikey)
+
+# Syncthing probes for a free port on first start, so the GUI is not always on
+# 8384 - a machine already running its own Syncthing pushes ours to another
+# port. Read where it actually is instead of assuming, or we would end up
+# talking to the other instance.
+GUI_URL="http://$(xmlget ./gui/address)"
 
 api() { # api METHOD PATH [JSON]
     curl -fsS -X "$1" -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
@@ -71,7 +92,11 @@ api() { # api METHOD PATH [JSON]
 
 echo 'Waiting for Syncthing...'
 for _ in $(seq 1 30); do api GET /rest/system/status >/dev/null 2>&1 && break; sleep 2; done
-api GET /rest/system/status >/dev/null || { echo 'Syncthing did not start.' >&2; exit 1; }
+api GET /rest/system/status >/dev/null || {
+    echo "Syncthing did not answer at $GUI_URL within 60s." >&2
+    echo 'Check: systemctl --user status langtechdepot.service' >&2
+    exit 1
+}
 
 MY_ID=$(api GET /rest/system/status | python3 -c "import json,sys; print(json.load(sys.stdin)['myID'])")
 DEVICE_NAME="$USER-$(hostname -s)"

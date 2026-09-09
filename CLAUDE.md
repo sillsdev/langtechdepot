@@ -70,6 +70,13 @@ only stops the reconciler from re-adding it.
   takes as an argument. Never rename a published one.
 - **Syncthing's config PATCH replaces child arrays wholesale**, so `share_catalog_with()`
   does read-modify-write on the device list rather than appending. Preserve that shape.
+- **Both installers pin Syncthing's `--home`.** Syncthing resolves its config dir by
+  probing — a legacy `~/.config/syncthing/config.xml` wins over the `~/.local/state`
+  default — so the path cannot be assumed, and reading `config.xml` from a guessed
+  location is how the Linux installer used to die. Pinning also gives the depot its own
+  Syncthing instance instead of borrowing the user's personal one, which matters because
+  registration PATCHes `defaults/folder` to receive-only and would otherwise rewrite
+  *their* defaults. Don't hardcode the GUI port either: first start probes for a free one.
 - Installers are idempotent and re-runnable.
 - Service binds localhost only; Caddy terminates TLS and also serves `/files` as a browsable
   tree of `/data/LT/Groups` for single-installer downloads.
