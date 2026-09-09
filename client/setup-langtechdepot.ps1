@@ -113,7 +113,7 @@ if (-not $Exe) {
 Write-Host "Using Syncthing at $Exe"
 
 if (-not (Test-Path (Join-Path $HomeDir 'config.xml'))) {
-    & $Exe generate --home $HomeDir --no-default-folder | Out-Null
+    & $Exe generate --home $HomeDir | Out-Null
 }
 $ApiKey = ([xml](Get-Content (Join-Path $HomeDir 'config.xml'))).configuration.gui.apikey
 $Headers = @{ 'X-API-Key' = $ApiKey }
