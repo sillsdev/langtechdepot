@@ -30,7 +30,8 @@ identity-in-device-name.
 ## Layout
 
 ```text
-client/  setup-langtechdepot.ps1        Windows installer
+client/  run-setup-langtechdepot.bat    double-click wrapper for the .ps1 (owns the pause)
+         setup-langtechdepot.ps1        Windows installer
          install-langtechdepot.sh       Linux installer
          langtechdepot-subscribe.ps1|sh CLI catalog list / subscribe
 server/  register.py                    registration service + admin CLI (stdlib + dotenv)
@@ -79,10 +80,13 @@ only stops the reconciler from re-adding it.
   machine: unreadable, and ransomware remediation resurrects it on delete. It is gitignored.
   The real Windows installer is `setup-langtechdepot.ps1`. Clear it from the Bitdefender
   console before removing the ignore entry.
-- **`REGISTER_URL` diverges between the two installers**: `setup-langtechdepot.ps1` points at
-  `https://depot.langtech.cloud`, `install-langtechdepot.sh` at
-  `https://langtechdepot.lingtransoft.info`. One of them is wrong; both must be set to the
-  real hostname before publishing.
+- **The hostname is `depot.langtech.cloud`** (settled in #1; `/files` there browses the
+  Groups tree). Both installers now carry it — `install-langtechdepot.sh` used to point at
+  `langtechdepot.lingtransoft.info`, which was the wrong half of a divergent pair. Don't
+  reintroduce the other name.
+- **Syncthing 2 has no `generate --no-default-folder`.** The flag *and* the "Default Folder"
+  it suppressed were both removed in 2.0, so passing it is a hard error and there is nothing
+  left to suppress. It is not an argument-order problem. Don't re-add it (see #7).
 - README documents administration as `register.py admin ...`; SETUP.md has moved to the
   `ltd-sync-admin` wrapper. Same underlying command.
 - The project was renamed twice — LangTran → LangTechDepot, and the `-sync` suffix dropped.

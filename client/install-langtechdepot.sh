@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-REGISTER_URL='https://langtechdepot.lingtransoft.info'
+REGISTER_URL='https://depot.langtech.cloud'
 
 DATA_ROOT="$HOME/LangTechDepot"
 GUI_URL='http://127.0.0.1:8384'
@@ -39,7 +39,10 @@ fi
 echo "Using Syncthing at $BIN"
 
 CONFIG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/syncthing"
-[ -f "$CONFIG_DIR/config.xml" ] || "$BIN" generate --no-default-folder >/dev/null
+# No --no-default-folder: Syncthing 2.0 removed that flag along with the
+# "Default Folder" it used to suppress, so passing it is a hard error
+# ("unknown flag --no-default-folder") and nothing is left to suppress.
+[ -f "$CONFIG_DIR/config.xml" ] || "$BIN" generate >/dev/null
 
 # Per-user unit: no root needed, and lingering keeps it syncing when logged out.
 mkdir -p "$HOME/.config/systemd/user"

@@ -26,23 +26,25 @@ one would be visible to every other field user.
 
 ## Install
 
-**Windows** — right-click `client/setup-langtechdepot.ps1` and choose **Run
-with PowerShell**. It installs Syncthing through winget; on a machine without
-winget, download Syncthing from <https://syncthing.net/downloads/> first and
-put `syncthing.exe` next to the script. (The script never downloads the
-executable itself — antivirus dropper heuristics flag scripts that fetch a
-binary and then register it for startup.)
+**Windows** — download the `client` files into one folder and double-click
+**`run-setup-langtechdepot.bat`**. It installs Syncthing through winget; on a
+machine without winget, download Syncthing from
+<https://syncthing.net/downloads/> first and put `syncthing.exe` in that same
+folder. (Nothing here ever downloads the executable itself — antivirus dropper
+heuristics flag scripts that fetch a binary and then register it for startup.)
 
-If the window opens and shuts again without asking for your token, Windows is
-blocking the downloaded script. Open PowerShell in that folder and run it
-directly:
+The `.bat` is a one-line wrapper around `setup-langtechdepot.ps1`, and it is
+there because a stock Windows machine refuses to run a downloaded `.ps1` at
+all: right-clicking the script and choosing **Run with PowerShell** fails, and
+the window closes before the reason is readable. The wrapper runs the same
+script the way that works. If you would rather type it yourself:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup-langtechdepot.ps1
 ```
 
-The installer waits for you to press Enter before closing, so anything that
-goes wrong stays on screen — send us that text.
+Either route waits for you to press Enter before closing, so anything that goes
+wrong stays on screen — send us that text.
 
 **Linux**
 
@@ -80,7 +82,8 @@ catalog shared. Administration is `register.py admin list|approve|revoke`.
 ## Repo layout
 
 ```text
-client/  setup-langtechdepot.ps1     field installer (Windows)
+client/  run-setup-langtechdepot.bat  double-click this on Windows
+         setup-langtechdepot.ps1     field installer (Windows)
          install-langtechdepot.sh    field installer (Linux)
          langtechdepot-subscribe.ps1|sh   CLI catalog list / subscribe
 server/  SETUP.md                    server standup guide

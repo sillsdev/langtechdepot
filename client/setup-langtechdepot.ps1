@@ -4,10 +4,12 @@ LangTechDepot installer (Windows).
 Installs Syncthing, registers this machine with the LangTechDepot server using the
 token you were issued, and leaves you at the folder catalog. Idempotent.
 
-Right-click this file and choose "Run with PowerShell".
+Double-click run-setup-langtechdepot.bat, which runs this script the one way a
+stock Windows machine allows. Right-clicking this file and choosing "Run with
+PowerShell" does not work on a machine whose execution policy has not been
+changed - the window closes before the reason is readable.
 
-If the window opens and closes again without asking you anything, Windows is
-blocking downloaded scripts. Open PowerShell in this folder and run:
+To run it by hand instead:
 
     powershell -ExecutionPolicy Bypass -File .\setup-langtechdepot.ps1
 
@@ -15,9 +17,11 @@ No token yet? Register at the URL below and one is emailed to you.
 #>
 
 param(
-    # Skip the "Press Enter to close" pause. For unattended runs only - that
-    # pause is the one thing standing between a field user and an error message
-    # that vanishes with the window.
+    # Skip the "Press Enter to close" pause. Used by
+    # run-setup-langtechdepot.bat, which pauses itself so the user is not asked
+    # twice, and by unattended runs. Do not pass it when a person runs this
+    # script directly: that pause is the one thing standing between a field user
+    # and an error message that vanishes with the window.
     [switch]$NoPause
 )
 
@@ -112,6 +116,9 @@ if (-not $Exe) {
 }
 Write-Host "Using Syncthing at $Exe"
 
+# No --no-default-folder: Syncthing 2.0 removed that flag along with the
+# "Default Folder" it used to suppress, so passing it is a hard error
+# ("unknown flag --no-default-folder") and nothing is left to suppress.
 if (-not (Test-Path (Join-Path $HomeDir 'config.xml'))) {
     & $Exe generate --home $HomeDir | Out-Null
 }
