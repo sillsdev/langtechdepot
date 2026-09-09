@@ -33,6 +33,17 @@ put `syncthing.exe` next to the script. (The script never downloads the
 executable itself — antivirus dropper heuristics flag scripts that fetch a
 binary and then register it for startup.)
 
+If the window opens and shuts again without asking for your token, Windows is
+blocking the downloaded script. Open PowerShell in that folder and run it
+directly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup-langtechdepot.ps1
+```
+
+The installer waits for you to press Enter before closing, so anything that
+goes wrong stays on screen — send us that text.
+
 **Linux**
 
 ```bash
