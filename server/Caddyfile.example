@@ -25,3 +25,38 @@ depot.langtech.cloud {
 	reverse_proxy localhost:8385
     }
 }
+
+# --- Bringing the instructions site here -------------------------------------
+#
+# Today the instructions site (docs/ in this repo) is published by GitHub
+# Pages and this host serves only the form. The two are written to merge: the
+# site's internal links are all relative, and the one absolute URL it needs -
+# the curl command on the Linux page - rewrites itself from window.location.
+#
+# When you are ready, publish the built site (the _site tree that
+# .github/workflows/pages.yml assembles, or docs/ plus a downloads/ folder) to
+# /srv/langtechdepot-site on this box and swap block 2 above for:
+#
+#     # The form keeps a path of its own so links already in people's mail
+#     # still work; register.py serves it at both / and /token.
+#     handle /token* {
+#         reverse_proxy localhost:8385
+#     }
+#     handle /register* {
+#         reverse_proxy localhost:8385
+#     }
+#     handle /request* {
+#         reverse_proxy localhost:8385
+#     }
+#     handle /healthz* {
+#         reverse_proxy localhost:8385
+#     }
+#     handle {
+#         root * /srv/langtechdepot-site
+#         file_server
+#     }
+#
+# Then set SITE_URL=https://depot.langtech.cloud in register.env, restart the
+# service, and in docs/assets/site.js set DEPOT to '' so the site's links to
+# the form become same-origin. Point GitHub Pages at this hostname or leave it
+# running as a mirror; both sites keep working either way.

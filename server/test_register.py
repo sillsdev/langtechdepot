@@ -89,19 +89,32 @@ def check(name, cond, extra=""):
 
 # form renders
 code, body = get(B + "/")
-check("GET / serves form", code == 200 and "Request token" in body)
+check("GET / serves form", code == 200 and "Send me a token" in body)
+
+# ...and under its own name, which is what survives the instructions site
+# eventually taking over "/" on this host.
+code, body = get(B + "/token?os=windows")
+check("GET /token serves the same form", code == 200 and "Send me a token" in body)
+check("platform carried into the form", 'name="os" value="windows"' in body
+      or "name=os value=\"windows\"" in body)
 
 # bad email rejected
 code, _ = get(B + "/request", b"person=X&email=notanemail", "application/x-www-form-urlencoded")
 check("rejects malformed email", code == 400)
 
 # issue a token
-code, body = get(B + "/request", b"person=Field+User&email=user%40sil.org&org=SIL&location=Chad",
+code, body = get(B + "/request",
+                 b"person=Field+User&email=user%40sil.org&org=SIL&location=Chad&os=windows",
                  "application/x-www-form-urlencoded")
-check("POST /request issues token", code == 200 and "Your token" in body)
-tok = re.search(r'class=tok>([^<]+)<', body)
+check("POST /request issues token", code == 200 and "Here is your token" in body)
+tok = re.search(r'id=tok>([^<]+)<', body)
 check("token shown (no SMTP configured)", tok is not None)
 token = tok.group(1) if tok else ""
+
+# The token page is a hand-off, not a dead end: something to copy it with, and
+# the way back to step 2 on the platform page they came from.
+check("token page offers a copy button", 'data-copy=tok' in body)
+check("token page links back to step 2", "windows.html" in body)
 
 conn = sqlite3.connect(DB); conn.row_factory = sqlite3.Row
 row = conn.execute("SELECT * FROM tokens WHERE token=?", (token,)).fetchone()

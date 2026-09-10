@@ -57,6 +57,11 @@ DB_PATH = os.environ.get("DB_PATH", "/var/lib/langtechdepot/register.db")
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8385"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
+# The instructions site. It owns steps 2-4 of the journey and this service owns
+# step 1, so every page here links back to it and it links here. One variable
+# because the two are meant to merge: when the site is served from this host,
+# point this at that path and nothing else changes.
+SITE_URL = os.environ.get("SITE_URL", "https://sillsdev.github.io/langtechdepot").rstrip("/")
 AUTO_APPROVE = os.environ.get("AUTO_APPROVE", "true").lower() not in ("0", "false", "no")
 CATALOG_FOLDERS = {f.strip() for f in os.environ.get("CATALOG_FOLDERS", "").split(",") if f.strip()}
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
@@ -248,44 +253,228 @@ def issue_token(email: str, person: str, org: str, location: str) -> tuple[str, 
     emailed = send_mail(
         email, "Your LangTechDepot access token",
         f"Paste this token into the LangTechDepot installer when it asks:\n\n    {token}\n\n"
-        "It works once, on one machine. Need another machine? Register again.\n",
+        "It works once, on one machine. Need another machine? Register again.\n\n"
+        f"Step-by-step instructions, with pictures:\n\n    {SITE_URL}/\n\n"
+        "Stuck? Reply to this message.\n",
     )
     return token, emailed
 
 
 # --- HTTP ---------------------------------------------------------------------
 
-PAGE = """<!doctype html><meta charset=utf-8>
+# This page is step 1 of a four-step journey whose other three steps live on
+# the instructions site (docs/ in this repo). A field user crosses between the
+# two mid-install, so the chrome here - masthead, step rail, buttons, the copy
+# row - is deliberately the same as docs/assets/site.css. Change one, change
+# both. It is duplicated rather than linked because this service is a single
+# stdlib file that must keep working when the other site is unreachable.
+#
+# Markers are @@NAME@@ rather than str.format fields: the page carries CSS and
+# JavaScript, and doubling every brace in them is how this file grows bugs.
+
+PAGE = """<!doctype html>
+<html lang=en>
+<meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>LangTechDepot &mdash; register</title>
+<title>LangTechDepot &mdash; @@TITLE@@</title>
 <style>
- body{{font:16px/1.55 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem;color:#1a1a1a}}
- h1{{font-size:1.5rem;margin:0 0 .35rem}} p.sub{{color:#555;margin:0 0 1.75rem}}
- label{{display:block;margin:1rem 0 .3rem;font-weight:600;font-size:.92rem}}
- input{{width:100%;padding:.55rem .65rem;font:inherit;border:1px solid #bbb;border-radius:6px}}
- button{{margin-top:1.5rem;padding:.6rem 1.4rem;font:inherit;font-weight:600;
-   background:#1f5fa9;color:#fff;border:0;border-radius:6px;cursor:pointer}}
- .note{{background:#f4f6f8;border-left:3px solid #1f5fa9;padding:.9rem 1.1rem;margin:1.5rem 0;border-radius:0 6px 6px 0}}
- code{{background:#eef1f4;padding:.15rem .4rem;border-radius:4px;font-size:.95em;word-break:break-all}}
- .tok{{display:block;padding:.9rem;margin:.6rem 0;font-size:1.05rem;text-align:center}}
+:root{--brand:#1f5fa9;--brand-dark:#17497f;--brand-soft:#e8f0fa;--ink:#16202b;
+ --ink-soft:#55636f;--line:#d8dee5;--paper:#fff;--ground:#f4f6f8;--ok:#1e7a46;
+ --shadow:0 1px 2px rgba(22,32,43,.06),0 8px 24px rgba(22,32,43,.07)}
+@media(prefers-color-scheme:dark){:root{--brand:#6fa8e8;--brand-dark:#9cc6f2;
+ --brand-soft:#17273a;--ink:#e8edf2;--ink-soft:#a3b1bf;--line:#2c3742;
+ --paper:#131a22;--ground:#0d131a;--ok:#5cc189;
+ --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+ font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:40rem;margin:0 auto;padding:0 1.25rem 4rem}
+.masthead{background:var(--paper);border-bottom:1px solid var(--line)}
+.masthead .wrap{display:flex;align-items:center;gap:.7rem;padding:1rem 1.25rem}
+.masthead a{display:flex;align-items:center;gap:.7rem;text-decoration:none;color:inherit}
+.masthead .name{font-weight:700;font-size:1.1rem;letter-spacing:-.01em}
+h1{font-size:clamp(1.6rem,5vw,2.1rem);line-height:1.15;letter-spacing:-.02em;margin:2rem 0 .5rem}
+.lede{font-size:1.1rem;color:var(--ink-soft);margin:0 0 1.8rem}
+a{color:var(--brand)}
+.rail{display:flex;gap:.4rem;list-style:none;margin:1.4rem 0 2rem;padding:0;
+ font-size:.8rem;font-weight:600}
+.rail li{flex:1;padding:.45rem .3rem .5rem;text-align:center;color:var(--ink-soft);
+ border-top:4px solid var(--line);border-radius:2px}
+.rail li.done{color:var(--ok);border-top-color:var(--ok)}
+.rail li.now{color:var(--brand);border-top-color:var(--brand)}
+.rail .n{display:block;font-size:.72rem;opacity:.8;font-weight:700}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:12px;
+ box-shadow:var(--shadow);padding:1.6rem}
+label{display:block;margin:1.1rem 0 .3rem;font-weight:600;font-size:.95rem}
+label .opt{font-weight:400;color:var(--ink-soft)}
+input{width:100%;padding:.7rem .75rem;font:inherit;color:var(--ink);
+ background:var(--ground);border:1px solid var(--line);border-radius:8px}
+input:focus{outline:2px solid var(--brand);outline-offset:1px}
+.btn,button[type=submit]{display:inline-flex;align-items:center;gap:.55rem;
+ background:var(--brand);color:#fff;text-decoration:none;font:inherit;font-weight:700;
+ border:0;cursor:pointer;padding:.85rem 1.5rem;border-radius:9px;margin:1.4rem 0 .2rem}
+.btn:hover,button[type=submit]:hover{background:var(--brand-dark)}
+.btn.big{font-size:1.15rem}
+@media(prefers-color-scheme:dark){.btn,button[type=submit],.copybtn{color:#0d131a}}
+.sub-btn{display:block;font-size:.9rem;color:var(--ink-soft)}
+.copyrow{display:flex;gap:.5rem;align-items:stretch;margin:1rem 0;flex-wrap:wrap}
+.copyrow .val{flex:1 1 14rem;min-width:0;font:700 1.15rem/1.4 ui-monospace,
+ SFMono-Regular,Consolas,monospace;background:var(--brand-soft);color:var(--ink);
+ border:1px solid var(--line);border-radius:9px;padding:.9rem;overflow-wrap:anywhere;
+ user-select:all;text-align:center}
+.copybtn{flex:none;font:inherit;font-weight:700;cursor:pointer;background:var(--brand);
+ color:#fff;border:0;border-radius:9px;padding:.9rem 1.3rem;min-width:7rem}
+.copybtn:hover{background:var(--brand-dark)}
+.copybtn.done{background:var(--ok)}
+.note{background:var(--paper);border:1px solid var(--line);border-left:4px solid var(--brand);
+ border-radius:0 9px 9px 0;padding:.9rem 1.1rem;margin:1.4rem 0;font-size:.96rem}
+.note>strong:first-child{display:block;margin-bottom:.2rem}
+code{background:var(--brand-soft);padding:.15rem .4rem;border-radius:4px;
+ font-size:.93em;overflow-wrap:anywhere}
+.foot{margin-top:2.5rem;padding-top:1.2rem;border-top:1px solid var(--line);
+ font-size:.92rem;color:var(--ink-soft)}
+.foot a{color:var(--ink-soft)}
 </style>
-{body}
+
+<header class=masthead><div class=wrap>
+ <a href="@@SITE@@/">
+  <svg width=28 height=28 viewBox="0 0 32 32" aria-hidden=true>
+   <path d="M4 11 16 5l12 6-12 6z" fill="var(--brand)"/>
+   <path d="M4 11v10l12 6V17z" fill="var(--brand)" opacity=".65"/>
+   <path d="M28 11v10l-12 6V17z" fill="var(--brand)" opacity=".4"/>
+  </svg>
+  <span class=name>LangTechDepot</span>
+ </a>
+</div></header>
+
+<main class=wrap>
+@@BODY@@
+</main>
+
+<script>
+/* Kept in step with docs/assets/site.js. navigator.clipboard needs a secure
+   context, so the textarea fallback stays: nobody should have to retype a
+   token by hand because the page was reached over plain http. */
+function ltdCopy(btn){
+ var src=document.getElementById(btn.getAttribute('data-copy'));
+ if(!src){return;}
+ var text=(src.textContent||'').trim();
+ var done=function(ok){
+  btn.classList.toggle('done',ok);
+  btn.textContent=ok?'Copied':'Press Ctrl+C';
+  if(ok){setTimeout(function(){btn.classList.remove('done');btn.textContent='Copy';},2500);}
+ };
+ var fallback=function(){
+  var ta=document.createElement('textarea');
+  ta.value=text;ta.setAttribute('readonly','');
+  ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();
+  var ok=false;
+  try{ok=document.execCommand('copy');}catch(e){ok=false;}
+  document.body.removeChild(ta);
+  if(!ok&&window.getSelection){
+   var r=document.createRange();r.selectNodeContents(src);
+   window.getSelection().removeAllRanges();window.getSelection().addRange(r);
+  }
+  done(ok);
+ };
+ if(navigator.clipboard&&navigator.clipboard.writeText){
+  navigator.clipboard.writeText(text).then(function(){done(true);},fallback);
+ }else{fallback();}
+}
+document.addEventListener('click',function(ev){
+ var btn=ev.target.closest?ev.target.closest('[data-copy]'):null;
+ if(btn){ltdCopy(btn);}
+});
+</script>
+</html>
 """
 
-FORM = """<h1>LangTechDepot access</h1>
-<p class=sub>Register to sync SIL software and training material to your machine.
-We&rsquo;ll issue you a token to paste into the installer.</p>
-<form method=post action=/request>
- <label for=person>Your name</label><input id=person name=person required>
+# Step rails. The one on the form says "you are at step 1"; the one on the
+# token page says "step 1 is behind you, go back for step 2". They are the
+# same four steps the instructions site shows, so the hand-off in either
+# direction lands the reader where they expect.
+RAIL_FORM = """<ol class=rail>
+ <li class=now><span class=n>Step 1</span>Get your token</li>
+ <li><span class=n>Step 2</span>Download</li>
+ <li><span class=n>Step 3</span>Run it</li>
+ <li><span class=n>Step 4</span>Pick your folders</li>
+</ol>"""
+
+RAIL_DONE = """<ol class=rail>
+ <li class=done><span class=n>Step 1</span>Token issued</li>
+ <li class=now><span class=n>Step 2</span>Download</li>
+ <li><span class=n>Step 3</span>Run it</li>
+ <li><span class=n>Step 4</span>Pick your folders</li>
+</ol>"""
+
+
+def next_step_url(osname: str) -> str:
+    """Back to the instructions site, at the page for the user's platform."""
+    page = {"windows": "windows.html", "linux": "linux.html"}.get(osname, "index.html")
+    return f"{SITE_URL}/{page}"
+
+
+def form_page(osname: str) -> str:
+    return f"""<h1>Get your token</h1>
+<p class=lede>One short form. We email you a token &mdash; a password that works
+once, on one machine &mdash; and you paste it into the installer.</p>
+{RAIL_FORM}
+<form method=post action=/request class=card>
+ <input type=hidden name=os value="{html.escape(osname)}">
+ <label for=person>Your name</label><input id=person name=person required autofocus>
  <label for=email>Email</label><input id=email name=email type=email required>
- <label for=org>Organisation / entity</label><input id=org name=org>
- <label for=location>Where you work</label><input id=location name=location
-   placeholder="country or region">
- <button type=submit>Request token</button>
+ <label for=org>Organisation <span class=opt>&mdash; optional</span></label>
+ <input id=org name=org>
+ <label for=location>Where you work <span class=opt>&mdash; optional</span></label>
+ <input id=location name=location placeholder="country or region">
+ <button type=submit>Send me a token</button>
 </form>
-<div class=note>Already have a token? Run the installer from
-<a href="https://github.com/sillsdev/langtechdepot">github.com/sillsdev/langtechdepot</a>
-and paste it when prompted.</div>"""
+<div class=note><strong>Setting up a second machine?</strong>
+Fill this in again. Each machine needs its own token.</div>
+<div class=note><strong>Not sure what this is?</strong>
+<a href="{next_step_url(osname)}">The instructions page</a> walks through all
+four steps with pictures.</div>"""
+
+
+def token_page(token: str, osname: str, email: str, emailed: bool) -> str:
+    """The token, big, with a copy button and the way back to step 2.
+
+    The token is shown even when it was also emailed. A field user on a slow
+    link who has to go and find a mail client mid-install is a user who does
+    not finish, and the person reading this page is the same person who filled
+    in the form a second ago - the mail copy is the backup, not the delivery.
+    """
+    if emailed:
+        mail_line = (f"<p>A copy is on its way to <code>{html.escape(email)}</code>, "
+                     "in case you want to finish this on the other machine.</p>")
+    else:
+        mail_line = ("<p>We could not send this by email, so this page is the only "
+                     "copy. Copy it before you leave.</p>")
+    return f"""<h1>Here is your token</h1>
+<p class=lede>It works once, on one machine. Copy it now &mdash; then go back and
+run the installer.</p>
+{RAIL_DONE}
+<div class=card>
+ <div class=copyrow>
+  <code class=val id=tok>{html.escape(token)}</code>
+  <button class=copybtn type=button data-copy=tok>Copy</button>
+ </div>
+ {mail_line}
+</div>
+<a class="btn big" href="{next_step_url(osname)}">Next: download the installer &rarr;</a>
+<span class=sub-btn>Leave this page open until the installer has asked you for
+the token.</span>
+<div class=note><strong>Keep it to yourself.</strong>
+A token admits one machine to the library. It stops working the moment it is
+used, so there is nothing to undo &mdash; but do not paste it into a group
+chat on the way.</div>"""
+
+
+def pick_os(value: str) -> str:
+    """Which platform page sent them here, so we can send them back to it."""
+    value = value.strip().lower()
+    return value if value in ("windows", "linux") else ""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -303,20 +492,30 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _page(self, code: int, body: str):
-        self._send(code, PAGE.format(body=body).encode(), "text/html; charset=utf-8")
+    def _page(self, code: int, body: str, title: str = "register"):
+        page = (PAGE.replace("@@TITLE@@", title)
+                    .replace("@@SITE@@", SITE_URL)
+                    .replace("@@BODY@@", body))
+        self._send(code, page.encode(), "text/html; charset=utf-8")
 
     def _json(self, code: int, obj: dict):
         self._send(code, json.dumps(obj).encode(), "application/json")
 
     def do_GET(self):
-        path = urllib.parse.urlparse(self.path).path
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
         if path == "/healthz":
             self._json(200, {"ok": True})
-        elif path == "/":
-            self._page(200, FORM)
+        # /token is the same form under a name of its own, so the instructions
+        # site can be moved onto this host's "/" later without breaking the
+        # links already in people's mail.
+        elif path in ("/", "/token"):
+            query = urllib.parse.parse_qs(parsed.query)
+            osname = pick_os(query.get("os", [""])[0])
+            self._page(200, form_page(osname), "get your token")
         else:
-            self._page(404, "<h1>Not found</h1>")
+            self._page(404, "<h1>Not found</h1>"
+                            f'<p><a href="{SITE_URL}/">Back to the instructions</a></p>')
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
@@ -356,21 +555,22 @@ class Handler(BaseHTTPRequestHandler):
             person = (form.get("person", [""])[0]).strip()[:120]
             org = (form.get("org", [""])[0]).strip()[:120]
             location = (form.get("location", [""])[0]).strip()[:120]
+            osname = pick_os(form.get("os", [""])[0])
             if not EMAIL_RE.match(email):
                 self._page(400, "<h1>Check your email address</h1>"
-                                "<p><a href=/>Back to the form</a></p>")
+                                f'<p><a href="/?os={osname}">Back to the form</a></p>',
+                           "check your email address")
                 return
             token, emailed = issue_token(email, person, org, location)
             if not AUTO_APPROVE:
-                self._page(200, "<h1>Request received</h1><p>An administrator will review it "
-                                "and email your token.</p>")
-            elif emailed:
-                self._page(200, f"<h1>Token sent</h1><p>Check <code>{html.escape(email)}</code>. "
-                                "Paste the token into the installer when it asks.</p>")
+                self._page(200, "<h1>Request received</h1>"
+                                "<p class=lede>Someone will review it and email your token. "
+                                "Nothing more to do until it arrives.</p>"
+                                f'<p><a href="{next_step_url(osname)}">Back to the '
+                                "instructions</a> &mdash; steps 2 to 4 are waiting there.</p>",
+                           "request received")
             else:
-                self._page(200, "<h1>Your token</h1><p>Copy this now &mdash; it is shown once, "
-                                "works once, on one machine.</p>"
-                                f"<code class=tok>{html.escape(token)}</code>")
+                self._page(200, token_page(token, osname, email, emailed), "your token")
             return
 
         self._page(404, "<h1>Not found</h1>")
