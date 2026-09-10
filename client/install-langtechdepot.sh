@@ -12,6 +12,9 @@
 set -euo pipefail
 
 REGISTER_URL='https://depot.langtech.cloud'
+# Where a stuck user is sent. The registration form answers "I have no token";
+# it does not answer "it failed", and those are different people.
+HELP_URL='https://sillsdev.github.io/langtechdepot/help.html'
 
 DATA_ROOT="$HOME/LangTechDepot"
 BIN="$HOME/.local/bin/syncthing"
@@ -134,7 +137,7 @@ done
 if [ -z "$RESPONSE" ]; then
     echo
     echo "Giving up after 3 attempts. Syncthing is installed and running; re-run this"
-    echo "script once you have a working token. Ask for help at $REGISTER_URL"
+    echo "script once you have a working token. Ask for help at $HELP_URL"
     exit 1
 fi
 

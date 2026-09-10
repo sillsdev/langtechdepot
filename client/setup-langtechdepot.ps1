@@ -28,6 +28,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RegisterUrl = 'https://depot.langtech.cloud'
+# Where a stuck user is sent. The registration form answers "I have no token";
+# it does not answer "it failed", and those are different people.
+$HelpUrl     = 'https://sillsdev.github.io/langtechdepot/help.html'
 
 $HomeDir  = Join-Path $env:LOCALAPPDATA 'LangTechDepot\config'
 $DataRoot = Join-Path $env:USERPROFILE 'LangTechDepot'
@@ -48,7 +51,7 @@ trap {
     Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
     Write-Host ''
     Write-Host 'Nothing is half-installed - running this script again is safe.'
-    Write-Host "For help, copy the message above and report it at $RegisterUrl"
+    Write-Host "For help, copy the message above and take it to $HelpUrl"
     Wait-BeforeClosing
     exit 1
 }
@@ -191,7 +194,7 @@ foreach ($attempt in 1..3) {
 if (-not $Registration) {
     Write-Host ''
     Write-Host 'Giving up after 3 attempts. Syncthing is installed and running; re-run this'
-    Write-Host "script once you have a working token. Ask for help at $RegisterUrl"
+    Write-Host "script once you have a working token. Ask for help at $HelpUrl"
     Wait-BeforeClosing
     exit 1
 }
