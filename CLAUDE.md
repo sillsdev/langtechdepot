@@ -68,9 +68,14 @@ other site is unreachable. **Change one, change both.**
 
 The two are meant to merge onto `depot.langtech.cloud` eventually, so everything is
 written to survive it: site links are relative, the Linux `curl` command rewrites itself
-from `window.location`, `DEPOT` in `site.js` and `SITE_URL` in `register.env` are the
-only absolute names, and the form already answers on `/token` as well as `/`. The
-Caddyfile carries the switch-over recipe.
+from `window.location`, `DEPOT`/`SIGNUP` in `site.js` and `SITE_URL` in `register.env`
+are the only absolute names, and the form already answers on `/signup` as well as `/`.
+The Caddyfile carries the switch-over recipe.
+
+**Step 1 is the form at `/`, not a token URL.** Nobody can be linked straight to a
+token — filling the form in is what mints one. `/signup` is a second address for that
+same form, reserved for after the merge; until then the site must link to `/`, because
+that is the only path the deployed service answers on.
 
 ## Commands
 

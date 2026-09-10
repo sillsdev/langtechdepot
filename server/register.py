@@ -506,10 +506,11 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         if path == "/healthz":
             self._json(200, {"ok": True})
-        # /token is the same form under a name of its own, so the instructions
-        # site can be moved onto this host's "/" later without breaking the
-        # links already in people's mail.
-        elif path in ("/", "/token"):
+        # Nobody can be sent straight to a token: the token is what this form
+        # gives back. /signup is the same form under a name of its own, so the
+        # instructions site can take over this host's "/" later without the
+        # form losing its address.
+        elif path in ("/", "/signup"):
             query = urllib.parse.parse_qs(parsed.query)
             osname = pick_os(query.get("os", [""])[0])
             self._page(200, form_page(osname), "get your token")

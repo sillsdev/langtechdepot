@@ -37,9 +37,9 @@ depot.langtech.cloud {
 # .github/workflows/pages.yml assembles, or docs/ plus a downloads/ folder) to
 # /srv/langtechdepot-site on this box and swap block 2 above for:
 #
-#     # The form keeps a path of its own so links already in people's mail
-#     # still work; register.py serves it at both / and /token.
-#     handle /token* {
+#     # The form keeps an address of its own once the site owns "/";
+#     # register.py serves it at both / and /signup.
+#     handle /signup* {
 #         reverse_proxy localhost:8385
 #     }
 #     handle /register* {
@@ -57,6 +57,7 @@ depot.langtech.cloud {
 #     }
 #
 # Then set SITE_URL=https://depot.langtech.cloud in register.env, restart the
-# service, and in docs/assets/site.js set DEPOT to '' so the site's links to
-# the form become same-origin. Point GitHub Pages at this hostname or leave it
+# service, and in docs/assets/site.js set DEPOT to '' and SIGNUP to '/signup'
+# so the site's links to the form become same-origin and stop colliding with
+# the site's own front page. Point GitHub Pages at this hostname or leave it
 # running as a mirror; both sites keep working either way.

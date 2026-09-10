@@ -93,8 +93,8 @@ check("GET / serves form", code == 200 and "Send me a token" in body)
 
 # ...and under its own name, which is what survives the instructions site
 # eventually taking over "/" on this host.
-code, body = get(B + "/token?os=windows")
-check("GET /token serves the same form", code == 200 and "Send me a token" in body)
+code, body = get(B + "/signup?os=windows")
+check("GET /signup serves the same form", code == 200 and "Send me a token" in body)
 check("platform carried into the form", 'name="os" value="windows"' in body
       or "name=os value=\"windows\"" in body)
 

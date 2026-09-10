@@ -1,17 +1,25 @@
 /* LangTechDepot site behaviour. Two jobs, both small.
 
    1. One place to change when the two sites merge. Every link that leaves
-      this site for the depot server is written as <a data-depot="/path">, and
-      every shell command that names the server carries data-depot-text. When
-      this site is eventually served from depot.langtech.cloud itself, set
-      DEPOT to '' and every one of them becomes a same-origin relative link.
-      Nothing else needs editing.
+      this site for the depot server is written as <a data-signup="query">,
+      and is built from the two constants below. When this site is eventually
+      served from depot.langtech.cloud itself, change those two and every link
+      follows. Nothing else needs editing.
 
    2. The copy buttons. server/register.py carries its own copy of this
       handler for the token page - it is one file with no assets and it must
       keep working if this site is unreachable. Change one, change both. */
 
 var DEPOT = 'https://depot.langtech.cloud';
+
+/* Path of the sign-up form on that server. Nobody can be sent straight to a
+   token: they fill this form in and the token comes back from it.
+
+   It is "/" today. When the instructions site takes over "/" on that host,
+   change this to "/signup" - register.py already answers there - and set
+   DEPOT to '' at the same time. Those two lines are the whole client side of
+   the merge. */
+var SIGNUP = '/';
 
 /* Where this site is published. Every download link in the pages is relative,
    so nothing here needs it - except the Linux command, which has to name an
@@ -28,8 +36,9 @@ function siteBase() {
 
 document.addEventListener('DOMContentLoaded', function () {
   var base = siteBase();
-  document.querySelectorAll('[data-depot]').forEach(function (el) {
-    el.setAttribute('href', DEPOT + el.getAttribute('data-depot'));
+  document.querySelectorAll('[data-signup]').forEach(function (el) {
+    var q = el.getAttribute('data-signup');
+    el.setAttribute('href', DEPOT + SIGNUP + (q ? '?' + q : ''));
   });
   if (base === SITE_DEFAULT || /^file:/.test(base)) { return; }
   document.querySelectorAll('[data-site-url]').forEach(function (el) {

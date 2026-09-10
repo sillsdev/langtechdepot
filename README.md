@@ -65,9 +65,14 @@ The download buttons 404 in that preview; the workflow is what fills
 
 Every link inside the site is relative and the one absolute URL — the `curl`
 command on the Linux page — rewrites itself from `window.location`, so the
-whole tree can be served from anywhere without edits. `DEPOT` in
-[docs/assets/site.js](docs/assets/site.js) is the single place that names the
-registration server.
+whole tree can be served from anywhere without edits. `DEPOT` and `SIGNUP` at
+the top of [docs/assets/site.js](docs/assets/site.js) are the only two things
+that name the registration server, and they are what the merge changes.
+
+The sign-up form is at `/` on that server, not `/signup` — a user cannot be
+sent straight to a token, because filling that form in is what produces one.
+`/signup` exists as a second address for the same form so that the form still
+has somewhere to live once the site takes over `/`.
 
 Two things bite when hand-writing the SVG:
 
@@ -126,7 +131,7 @@ catalog shared. Administration is `register.py admin list|approve|revoke`.
 
 [server/Caddyfile.example](server/Caddyfile.example) carries the recipe for the
 end state: the instructions site served from `depot.langtech.cloud` itself,
-with the form kept at `/token` so links already in people's mail still work.
+with the form kept at `/signup` so it still has an address of its own.
 
 ```bash
 python3 server/test_register.py     # full suite; no network, no real Syncthing
