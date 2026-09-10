@@ -3,3 +3,6 @@
 # Bitdefender console, then drop this entry. Replacement: setup-langtechdepot.ps1.
 client/install-langtran-sync.ps1
 __pycache__/
+
+# Rendered register.py pages, for eyeballing the site and the form together.
+docs/_preview/

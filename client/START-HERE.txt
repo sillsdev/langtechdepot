@@ -1,0 +1,15 @@
+LangTechDepot installer
+=======================
+
+Double-click:  run-setup-langtechdepot.bat
+
+That is all. It will ask you for your token - paste it in and press Enter.
+
+If you have not got a token yet, or something goes wrong, the step-by-step
+instructions with pictures are here:
+
+    https://sillsdev.github.io/langtechdepot/
+
+Both files in this folder are needed, and they must stay side by side. If you
+are reading this inside the zip window, unpack the folder first: right-click
+the zip -> Extract All -> Extract.

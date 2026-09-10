@@ -1,0 +1,82 @@
+# Publishes docs/ as the instructions site, with the client installers packed
+# alongside it as downloads.
+#
+# The zip is built here rather than committed so that there is exactly one copy
+# of every installer in this repo. A committed zip is a second copy, and the
+# second copy is the one that goes stale.
+#
+# One-time repository setting: Settings -> Pages -> Source -> "GitHub Actions".
+# Without it this workflow runs green and publishes nothing.
+
+name: Publish the instructions site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'client/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A second push while a deploy is in flight should win, not queue behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          set -eu
+          mkdir -p _site/downloads
+          cp -r docs/. _site/
+          # Windows: one file to download, holding the two that must sit side
+          # by side. .gitattributes checks these out CRLF even on Linux, and
+          # zip stores bytes untouched, so they arrive as Windows files.
+          zip -j _site/downloads/langtechdepot-windows.zip \
+            client/run-setup-langtechdepot.bat \
+            client/setup-langtechdepot.ps1 \
+            client/START-HERE.txt
+          # Linux: the installer is fetched by the one command on linux.html.
+          cp client/install-langtechdepot.sh _site/downloads/
+          # Both platforms: the optional command-line catalog tool.
+          cp client/langtechdepot-subscribe.sh _site/downloads/
+          cp client/langtechdepot-subscribe.ps1 _site/downloads/
+
+      - name: Check the download links resolve
+        run: |
+          set -eu
+          # A renamed installer silently turns the download buttons into 404s,
+          # and nobody notices until a field user reports it. Catch it here.
+          fail=0
+          for f in downloads/langtechdepot-windows.zip \
+                   downloads/install-langtechdepot.sh \
+                   index.html windows.html linux.html help.html \
+                   assets/site.css assets/site.js; do
+            [ -s "_site/$f" ] || { echo "missing or empty: $f"; fail=1; }
+          done
+          exit $fail
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

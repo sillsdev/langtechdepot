@@ -1,0 +1,194 @@
+/* LangTechDepot — shared look for the Pages site and for the registration
+   pages served by server/register.py.
+
+   The two sites are one journey (get a token there, install here), so they
+   must not look like two different projects. Keep this file and the <style>
+   block in register.py in step: same tokens, same component names.
+
+   Field machines are on slow links, so: no web fonts, no framework, no
+   images. Illustrations are inline SVG in the page itself. */
+
+:root {
+  --brand:      #1f5fa9;
+  --brand-dark: #17497f;
+  --brand-soft: #e8f0fa;
+  --ink:        #16202b;
+  --ink-soft:   #55636f;
+  --line:       #d8dee5;
+  --paper:      #ffffff;
+  --ground:     #f4f6f8;
+  --ok:         #1e7a46;
+  --warn:       #a05a00;
+  --radius:     12px;
+  --shadow:     0 1px 2px rgba(22,32,43,.06), 0 8px 24px rgba(22,32,43,.07);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand:      #6fa8e8;
+    --brand-dark: #9cc6f2;
+    --brand-soft: #17273a;
+    --ink:        #e8edf2;
+    --ink-soft:   #a3b1bf;
+    --line:       #2c3742;
+    --paper:      #131a22;
+    --ground:     #0d131a;
+    --ok:         #5cc189;
+    --warn:       #e0a44a;
+    --shadow:     0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.wrap { max-width: 46rem; margin: 0 auto; padding: 0 1.25rem 4rem; }
+
+/* --- masthead: identical on both sites, so the hand-off is invisible ------ */
+
+.masthead {
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+.masthead .wrap {
+  display: flex; align-items: center; gap: .7rem;
+  padding-top: 1rem; padding-bottom: 1rem;
+}
+.masthead a { display: flex; align-items: center; gap: .7rem;
+  text-decoration: none; color: inherit; }
+.masthead .name { font-weight: 700; font-size: 1.1rem; letter-spacing: -.01em; }
+.masthead .mark { flex: none; }
+
+/* --- page head ----------------------------------------------------------- */
+
+h1 { font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.15;
+     letter-spacing: -.02em; margin: 2.2rem 0 .5rem; }
+h2 { font-size: 1.25rem; margin: 2.5rem 0 .6rem; letter-spacing: -.01em; }
+.lede { font-size: 1.12rem; color: var(--ink-soft); margin: 0 0 2rem; }
+p { margin: .8rem 0; }
+a { color: var(--brand); }
+
+/* --- the four-step rail, shared by both sites ---------------------------- */
+
+.rail {
+  display: flex; gap: .4rem; list-style: none;
+  margin: 1.6rem 0 0; padding: 0; font-size: .8rem; font-weight: 600;
+}
+.rail li {
+  flex: 1; padding: .45rem .3rem .5rem; text-align: center;
+  color: var(--ink-soft); border-top: 4px solid var(--line);
+  border-radius: 2px;
+}
+.rail li.done { color: var(--ok); border-top-color: var(--ok); }
+.rail li.now  { color: var(--brand); border-top-color: var(--brand); }
+.rail .n { display: block; font-size: .72rem; opacity: .8; font-weight: 700; }
+
+/* --- step cards ---------------------------------------------------------- */
+
+.step {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; margin: 1.25rem 0;
+  display: grid; grid-template-columns: 3.1rem 1fr; gap: 0 1.1rem;
+}
+/* The number sits alone in the first column; everything else stacks in the
+   second. Without pinning the rest, auto-placement drops whatever follows the
+   number's row span back into the 3rem column and squeezes it to nothing. */
+.step > :not(.num) { grid-column: 2; }
+.step > .num {
+  grid-column: 1; grid-row: 1;
+  width: 3.1rem; height: 3.1rem; border-radius: 50%;
+  background: var(--brand); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem; font-weight: 700;
+}
+@media (prefers-color-scheme: dark) { .step > .num { color: #0d131a; } }
+.step h3 { margin: .35rem 0 .3rem; font-size: 1.3rem; letter-spacing: -.01em; }
+.step p  { margin: .4rem 0; }
+.step .art { margin: 1rem 0 .2rem; }
+.step .art svg { max-width: 100%; height: auto; display: block; }
+
+@media (max-width: 30rem) {
+  .step { grid-template-columns: 1fr; }
+  .step > .num, .step > :not(.num) { grid-column: 1; }
+  .step > .num { margin-bottom: .6rem; }
+}
+
+/* --- buttons ------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex; align-items: center; gap: .55rem;
+  background: var(--brand); color: #fff; text-decoration: none;
+  font: inherit; font-weight: 700; border: 0; cursor: pointer;
+  padding: .8rem 1.4rem; border-radius: 9px; margin: .8rem 0 .3rem;
+}
+.btn:hover { background: var(--brand-dark); }
+.btn.big  { font-size: 1.15rem; padding: 1rem 1.7rem; }
+.btn.ghost { background: transparent; color: var(--brand);
+             box-shadow: inset 0 0 0 2px var(--brand); }
+.btn.ghost:hover { background: var(--brand-soft); }
+/* Grid items stretch by default, which turns every button into a full-width
+   slab. Hug the label instead - except on a phone, where full width is the
+   easier target. */
+.step > .btn { justify-self: start; }
+@media (max-width: 30rem) { .step > .btn { justify-self: stretch; justify-content: center; } }
+@media (prefers-color-scheme: dark) {
+  .btn { color: #0d131a; } .btn.ghost { color: var(--brand); }
+}
+.sub-btn { display: block; font-size: .9rem; color: var(--ink-soft); margin: .1rem 0 0; }
+
+/* --- platform chooser ---------------------------------------------------- */
+
+.choose { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); margin: 1.5rem 0; }
+.choice {
+  display: flex; flex-direction: column; align-items: center; gap: .6rem;
+  background: var(--paper); border: 2px solid var(--line); border-radius: var(--radius);
+  padding: 2rem 1rem 1.6rem; text-decoration: none; color: inherit;
+  box-shadow: var(--shadow);
+}
+.choice:hover { border-color: var(--brand); }
+.choice .label { font-size: 1.3rem; font-weight: 700; }
+.choice .hint  { font-size: .92rem; color: var(--ink-soft); text-align: center; }
+
+/* --- copy row: the token on depot, the command here ---------------------- */
+
+.copyrow { display: flex; gap: .5rem; align-items: stretch; margin: .9rem 0; flex-wrap: wrap; }
+.copyrow .val {
+  flex: 1 1 14rem; min-width: 0;
+  font: 600 1.05rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+  background: var(--brand-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 9px;
+  padding: .8rem .9rem; overflow-wrap: anywhere; user-select: all;
+}
+.copybtn {
+  flex: none; font: inherit; font-weight: 700; cursor: pointer;
+  background: var(--brand); color: #fff; border: 0; border-radius: 9px;
+  padding: .8rem 1.2rem; min-width: 6.5rem;
+}
+.copybtn:hover { background: var(--brand-dark); }
+.copybtn.done  { background: var(--ok); }
+@media (prefers-color-scheme: dark) { .copybtn { color: #0d131a; } }
+
+/* --- notes --------------------------------------------------------------- */
+
+.note {
+  background: var(--paper); border: 1px solid var(--line);
+  border-left: 4px solid var(--brand); border-radius: 0 9px 9px 0;
+  padding: .9rem 1.1rem; margin: 1.4rem 0; font-size: .96rem;
+}
+.note.warn { border-left-color: var(--warn); }
+.note > strong:first-child { display: block; margin-bottom: .2rem; }
+
+code { background: var(--brand-soft); padding: .15rem .4rem; border-radius: 4px;
+       font-size: .93em; overflow-wrap: anywhere; }
+
+.foot { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--line);
+        font-size: .92rem; color: var(--ink-soft); }
+.foot a { color: var(--ink-soft); }

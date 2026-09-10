@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LangTechDepot &mdash; help</title>
+<meta name="description" content="What normally goes wrong when setting up LangTechDepot, and how to fix it.">
+<link rel="stylesheet" href="assets/site.css">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+
+<header class="masthead"><div class="wrap">
+  <a href="index.html">
+    <svg class="mark" width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M4 11 16 5l12 6-12 6z" fill="var(--brand)"/>
+      <path d="M4 11v10l12 6V17z" fill="var(--brand)" opacity=".65"/>
+      <path d="M28 11v10l-12 6V17z" fill="var(--brand)" opacity=".4"/>
+    </svg>
+    <span class="name">LangTechDepot</span>
+  </a>
+</div></header>
+
+<main class="wrap">
+
+  <h1>Help</h1>
+  <p class="lede">Almost everything that goes wrong is one of the things below.
+  Find yours, or skip to <a href="#ask">asking a person</a>.</p>
+
+  <h2>It says my token is invalid or already used</h2>
+  <p>A token works <strong>once, on one machine</strong>. If you have already
+  run the installer successfully on this computer, you are done &mdash; there
+  is nothing more to do. For a second computer, or after a reinstall,
+  <a href="https://depot.langtech.cloud/token" data-depot="/token">request a new
+  token</a>. Also check nothing extra came along when you copied it: a stray
+  space or a line break at the end will fail.</p>
+
+  <h2>The black window closed before I could read it</h2>
+  <p>Then it was not started the documented way. Double-click
+  <code>run-setup-langtechdepot.bat</code> &mdash; not the
+  <code>.ps1</code> file. The <code>.bat</code> holds the window open so any
+  error stays on screen.</p>
+
+  <h2>Windows says &ldquo;Windows protected your PC&rdquo;</h2>
+  <p>Click <strong>More info</strong>, then <strong>Run anyway</strong>. This
+  appears for anything downloaded from the internet that has not been through
+  Microsoft&rsquo;s paid signing programme.</p>
+
+  <h2>It cannot find <code>setup-langtechdepot.ps1</code></h2>
+  <p>The two files are not side by side. Almost always this means the zip was
+  never unpacked: right-click the downloaded zip &rarr; <strong>Extract
+  All</strong> &rarr; <strong>Extract</strong>, then open the extracted folder
+  and double-click the <code>.bat</code> in <em>there</em>.</p>
+
+  <h2>It cannot find Syncthing</h2>
+  <p>The machine has no <em>winget</em>, so the installer could not fetch
+  Syncthing for you. Download it yourself from
+  <a href="https://syncthing.net/downloads/">syncthing.net/downloads</a>
+  (the Windows 64-bit archive), put <code>syncthing.exe</code> in the same
+  extracted folder as the other two files, and run the <code>.bat</code>
+  again.</p>
+
+  <h2>My antivirus deleted the installer</h2>
+  <p>Some antivirus products remove scripts they have not seen before. Restore
+  it from the quarantine list, or ask whoever manages the machine to allow the
+  folder. Tell us if this happens &mdash; it is worth knowing which product.</p>
+
+  <h2>No folders are being offered to me</h2>
+  <p>Give it two or three minutes; the offers do not appear instantly. Then, in
+  the Syncthing page at <code>127.0.0.1:8384</code>, look at <strong>Remote
+  Devices</strong> on the right. If the depot is listed but disconnected, this
+  machine cannot reach the server &mdash; usually a firewall or a captive
+  portal. If it is not listed at all, registration did not complete: run the
+  installer again with a fresh token.</p>
+
+  <h2>I deleted a file by accident</h2>
+  <p>Nothing is lost, and nothing propagates. Your folders are
+  <strong>receive only</strong>, so Syncthing simply flags the difference and
+  offers a <strong>Revert local changes</strong> button, which brings the file
+  back from the server. The same is true if you edit one.</p>
+
+  <h2>Can I run it again?</h2>
+  <p>Yes. The installer is safe to run as many times as you like &mdash; it
+  checks what is already in place rather than redoing it. You only need a new
+  token if the machine was never registered successfully.</p>
+
+  <h2>Can I copy the files to another machine on a memory stick?</h2>
+  <p>Yes. What lands on your disk is ordinary files and folders, not a special
+  format &mdash; copy the tree and carry it. Machines in the same office also
+  sync directly from each other, so only the first one to get a file pulls it
+  over the long link.</p>
+
+  <h2 id="ask">Asking a person</h2>
+  <p>Reply to the email your token arrived in &mdash; it reaches the people who
+  run the depot. Two things make a fast answer much more likely:</p>
+  <ul>
+    <li>whether you are on Windows or Linux, and</li>
+    <li>the exact text of any error, copied from the window rather than
+    described. A photo of the screen is fine too.</li>
+  </ul>
+  <!-- Maintainers: if a monitored support address exists, put it here in
+       place of "reply to the email". The register.py ADMIN_EMAIL is the
+       address the token mail comes from. -->
+
+  <p class="foot"><a href="index.html">&larr; Back to the start</a> &middot;
+  <a href="windows.html">Windows steps</a> &middot;
+  <a href="linux.html">Linux steps</a></p>
+
+</main>
+<script src="assets/site.js"></script>
+</html>
