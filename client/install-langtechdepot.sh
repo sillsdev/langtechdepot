@@ -62,7 +62,7 @@ Description=LangTechDepot (Syncthing)
 After=network.target
 
 [Service]
-ExecStart=$BIN serve --no-browser --home "$CONFIG_DIR"
+ExecStart="$BIN" serve --no-browser --home "$CONFIG_DIR"
 Restart=on-failure
 
 [Install]
