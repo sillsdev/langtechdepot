@@ -126,6 +126,7 @@ def db() -> sqlite3.Connection:
         revoked_at  TEXT
     )""")
     conn.commit()
+    # needs to set permissions on DB_PATH to 640.
     return conn
 
 
