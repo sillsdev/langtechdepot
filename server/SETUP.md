@@ -200,3 +200,28 @@ sudo apt remove resilio-sync
 ```
 
 The repo directories are untouched — Resilio shared them, it never owned them.
+
+## 9 Managers' read-write sync
+
+We use the Windows program `Ketarin` running over WINE to keep program installers up-to-date. This program uses "recipes" to check the sites where these installers are hosted, and if any installer has been updated, Ketarin fetches the new version.Ketarin contains an editor for creating and modifying these recipes. But running over WINE, that editor is very hard to use. So it is very handy to be able to export a recipe to a folder that syncs to a Windows computer, edit the recipe there and export it back, let it sync to this server and import the fixed version into Ketarin running over WINE.
+
+So we have been using a folder called Extra between this server and managers' Windows computers.
+
+To set this up without the risk of the recipients of installers from this repo seeing Extra, it is in a different folder tree, and we can run another instance of SyncThing with a different username, `ltadmin`.
+``` bash
+sudo systemctl enable --now syncthing@ltadmin
+sudo systemctl stop syncthing@ltadmin
+sudo $EDITOR /home/ltadmin/.local/state/syncthing/syncthing/config.xml
+```
+Find the `<gui>` section and set it like this, using port 3836 (because register.py uses 3835.)
+```
+<gui enabled="true" tls="false" debugging="false">
+    <address>127.0.0.1:8386</address>
+</gui>
+```
+Restart this instance with
+```
+sudo systemctl start syncthing@ltadmin
+```
+Use your web browser to access the `ltadmin` instance with `localhost:3836`.
+
