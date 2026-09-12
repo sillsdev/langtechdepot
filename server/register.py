@@ -663,6 +663,7 @@ def admin(argv: list[str]) -> None:
 
 
 def main() -> None:
+    os.umask(0o027)	# user can have rwx, group can have rx, others have nothing.
     if len(sys.argv) > 1 and sys.argv[1] == "admin":
         admin(sys.argv[2:])
         return
