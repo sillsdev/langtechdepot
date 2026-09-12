@@ -47,6 +47,7 @@ The `.stignore` folder should contain:
 
 Here are the steps to make the symbolic links:
 ```
+umask 027  # Ensure group read-only access and completely block others
 cd /data/LT/BTSync
 rm *.txt
 for d in *; do ln -fs /data/LT/.stignore $d/.stignore; done
@@ -61,7 +62,7 @@ both login accounts need to be listed in the group called *syncthing*, with thes
 ```bash
 sudo usermod -aG syncthing ltadmin
 sudo usermod -aG syncthing $USER
-newgrp syncthing
+newgrp syncthing	# start a new shell with your new permissions
 ```
 ## 3. Create the folder catalog
 
@@ -88,6 +89,7 @@ minute.
 This is how field machines join. Nothing else admits a device.
 
 ```bash
+umask 027  # Ensure group read-only access and completely block others
 sudo apt update && sudo apt install -y python3-dotenv
 sudo mkdir -p /opt/langtechdepot /etc/langtechdepot
 sudo cp register.py /opt/langtechdepot/
@@ -146,6 +148,7 @@ Caddy is easier to manage than apache, so we'll turn off apache and use caddy.
 Caddy terminates TLS and renews the certificate on its own:
 
 ```bash
+umask 027  # Ensure group read-only access and completely block others
 sudo apt install caddy
 sudo cp Caddyfile.example /etc/caddy/Caddyfile
 sudo $EDITOR /etc/caddy/Caddyfile          # set the real hostname
