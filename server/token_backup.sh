@@ -1,7 +1,7 @@
 #!/bin/bash
 # set -x
 # Get the current date for the filename
-DATE=$(date +%Y-%m-%d_%H%M%M)
+DATE=$(date +%Y-%m-%d_%H%M%S)
 BACKUP_DIR="/data/LT/Backups/ClientsHowto"
 BACKUP_FILE="$BACKUP_DIR/register_${DATE}.db"
 
