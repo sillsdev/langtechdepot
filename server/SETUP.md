@@ -114,7 +114,8 @@ then enable the script:
 ``` bash
 $EDITOR ltd-sync-admin	# check folder of register.py
 chmod ug+x !$
-ln !$ /usr/local/bin
+# Make a symbolic link to it in /usr/local/bin
+ln -s `pwd`/ltd-sync-admin /usr/local/bin/ltd-sync-admin
 ```
 
 So that the clients' tokens can be backed up,
@@ -122,7 +123,8 @@ make sure that the backup script will put them in the right place.
 ``` bash
 $EDITOR token_backup.sh	# check BACKUP_DIR etc
 chmod ug+x !$
-ln !$ /usr/local/bin
+# Make a symbolic link to it in /usr/local/bin
+ln -s `pwd`/token_backup.sh /usr/local/bin/token_backup.sh
 BACKUP_DIR=/data/LT/Backup/ClientsHowto	# or wherever you put it
 sudo mkdir -p $BACKUP_DIR
 ls -lrt $BACKUP_DIR
