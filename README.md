@@ -6,9 +6,16 @@ no jargon. This README is for the people who maintain the thing.
 
 ---
 
-Distribution layer for the [LangTechDepot software repository](https://lingtransoft.info/apps/LangTechDepot),
+Language workers go where the internet is poor, expensive or absent, and they
+need the current installers already on the machine when they get there. This is
+the layer that puts them there: a distribution front end for the
+[LangTechDepot software repository](https://lingtransoft.info/apps/LangTechDepot),
 built on [Syncthing](https://syncthing.net/) (open source, no licenses, actively
-developed). Replaces Resilio Sync.
+developed). Replaces Resilio Sync, whose licences can no longer be obtained.
+
+**[intent.md](intent.md)** states the goals this has to serve, how far the code
+gets today, and what that rules out. Read it before changing anything a user
+touches.
 
 How it works: the repository server in California marks every catalog folder
 **Send Only** and offers all of them to each registered device. The client's

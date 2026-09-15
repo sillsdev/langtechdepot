@@ -5,6 +5,10 @@ Distribution layer for the LangTechDepot software repository
 Resilio Sync setup whose donated licences were tied to a version no longer available.
 Audience: ~50 field machines on low-bandwidth links, Windows and Linux, no admin rights.
 
+**Before making design decisions, read [intent.md](intent.md).** It states what the
+system is for, which of those goals the code actually meets today, and the rules that
+follow from them. This file is the mechanism; that one is the reason.
+
 This repo is **only the thin layer** — client installers, a subscribe CLI, the
 server-side registration service, and the instructions site users are pointed at.
 Syncthing does the syncing; we add no protocol code. The catalog content lives on the
