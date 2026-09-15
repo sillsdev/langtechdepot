@@ -84,6 +84,47 @@ Folders added *after* people register are picked up automatically: the
 registration service re-shares the catalog with every active device once a
 minute.
 
+### Give every folder a label
+
+The ID is permanent and therefore terse; the **label** is what the user
+actually reads when Syncthing offers them the folder, and it is free to change.
+Without one, a field user choosing at step 4 sees `Win_everything_en` and has
+no way to tell what is in it or whether it is meant for them.
+
+Labels are set here, not in the GUI - the registration service applies them on
+every reconcile pass, so they also reach the ~50 devices that registered before
+the label existed:
+
+```bash
+sudo install -m 644 -o root -g root \
+    /path/to/repo/server/labels.example.json /etc/langtechdepot/labels.json
+sudo -e /etc/langtechdepot/labels.json   # then write the real words
+```
+
+One entry per folder, `{"folder id": "label"}`. A folder with no entry keeps
+whatever label it has, so the file can be filled in a few folders at a time. The
+service re-reads it within a minute of it changing - no restart, no downtime -
+which is deliberate: a label is something you reword once you have seen it on a
+real client.
+
+Keep them scannable. The list is the only thing that ever explains the catalog
+to a user, so a label should say who the folder is for, and warn about size
+where that matters:
+
+```json
+"Win_everything_en": "Windows software, English - the whole shelf (large; take it on a good connection)",
+"Win_FldWrk_en":     "Windows software, English - fieldwork essentials (smaller; for slow links)"
+```
+
+Labels travel to every device the folder is offered to, exactly as device names
+do, so treat them as public.
+
+Check it took:
+
+```bash
+journalctl -u langtechdepot-register -f | grep -E '\[labels\]|label '
+```
+
 ## 4. Install the registration service
 
 This is how field machines join. Nothing else admits a device.
