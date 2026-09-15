@@ -170,18 +170,31 @@ def catalog_folder_ids() -> list[str]:
 
 def share_catalog_with(device_ids: set[str]) -> list[str]:
     """Add device_ids to every catalog folder's device list. PATCH replaces
-    child arrays wholesale, so read-modify-write rather than append."""
+    child arrays wholesale, so read-modify-write rather than append.
+    Also ensures folder type is strictly set to 'sendonly'."""
     touched = []
     for folder in st("GET", "/rest/config/folders") or []:
         if CATALOG_FOLDERS and folder["id"] not in CATALOG_FOLDERS:
             continue
+
         have = {d["deviceID"] for d in folder.get("devices", [])}
         missing = device_ids - have
-        if not missing:
+        current_type = folder.get("type", "")
+
+        # Trigger an update if there are missing devices OR if the type isn't sendonly
+        if not missing and current_type == "sendonly":
             touched.append(folder["id"])
             continue
+
         new_devices = folder.get("devices", []) + [{"deviceID": d} for d in sorted(missing)]
-        st("PATCH", f"/rest/config/folders/{folder['id']}", {"devices": new_devices})
+
+        # Build the PATCH payload incorporating both the updated devices and the type constraint
+        patch_payload = {
+            "devices": new_devices,
+            "type": "sendonly"
+        }
+
+        st("PATCH", f"/rest/config/folders/{folder['id']}", patch_payload)
         touched.append(folder["id"])
     return touched
 
