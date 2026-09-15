@@ -194,6 +194,7 @@ def share_catalog_with(device_ids: set[str]) -> list[str]:
             "type": "sendonly"
         }
 
+        print(f"[reconcile] Flipped {folder['id']} to sendonly because it was {current_type}", flush=True)
         st("PATCH", f"/rest/config/folders/{folder['id']}", patch_payload)
         touched.append(folder["id"])
     return touched
