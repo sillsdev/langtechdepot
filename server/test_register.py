@@ -11,12 +11,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TMP = tempfile.mkdtemp(prefix="langtechdepot-test-")
 REPO = HERE
 DB = os.path.join(TMP, "register.db")
+LABELS = os.path.join(TMP, "labels.json")
 DEV = "P56IOI7-MZJNU2Y-IQGDREY-DM2MGTI-MGL3BXN-PQ6W5BM-TBBZ4TJ-XZWICQ2"
 DEV2 = "ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2"
 
 state = {"devices": [], "folders": [{"id": "software-core", "devices": []},
                                     {"id": "training-videos", "devices": []}],
-         "deleted": []}
+         "deleted": [], "patches": 0}
 
 
 class Fake(BaseHTTPRequestHandler):
@@ -43,8 +44,12 @@ class Fake(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         m = re.match(r"^/rest/config/folders/(.+)$", self.path)
         if m:
+            # Syncthing merges the keys it is given; only child arrays are
+            # replaced wholesale. Applying the whole body is what makes type
+            # and label observable here.
+            state["patches"] += 1
             for f in state["folders"]:
-                if f["id"] == m.group(1): f["devices"] = body["devices"]
+                if f["id"] == m.group(1): f.update(body)
             self._j(200, {})
         else: self._j(404, {})
 
@@ -72,7 +77,8 @@ threading.Thread(target=fake.serve_forever, daemon=True).start()
 if os.path.exists(DB): os.remove(DB)
 env = {**os.environ, "SYNCTHING_URL": "http://127.0.0.1:18384", "SYNCTHING_API_KEY": "test",
        "DB_PATH": DB, "LISTEN_PORT": "18385", "AUTO_APPROVE": "true", "SMTP_HOST": "",
-       "SERVER_ADDRESS": "tcp://langtechdepot.example.org:22000"}
+       "SERVER_ADDRESS": "tcp://langtechdepot.example.org:22000",
+       "CATALOG_LABELS": LABELS}
 proc = subprocess.Popen([sys.executable, os.path.join(REPO, "register.py")], env=env,
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 B = "http://127.0.0.1:18385"
@@ -154,10 +160,63 @@ subprocess.run([sys.executable, os.path.join(REPO, "register.py"), "admin", "lis
                capture_output=True, text=True)
 time.sleep(0)  # reconciler runs on its own 60s cadence; exercise the function directly instead
 sys.path.insert(0, REPO)
-os.environ.update({k: env[k] for k in ("SYNCTHING_URL", "SYNCTHING_API_KEY", "DB_PATH", "SERVER_ADDRESS")})
+os.environ.update({k: env[k] for k in ("SYNCTHING_URL", "SYNCTHING_API_KEY", "DB_PATH",
+                                       "SERVER_ADDRESS", "CATALOG_LABELS")})
 import register as reg  # noqa: E402
 reg.share_catalog_with({DEV})
 check("late-added folder gets shared", any(d["deviceID"] == DEV for d in state["folders"][-1]["devices"]))
+check("catalog folders are forced Send Only", all(f.get("type") == "sendonly" for f in state["folders"]))
+
+# --- folder labels ------------------------------------------------------------
+# A folder announces itself with an ID and a label. The ID is permanent and so
+# it is terse; the label is where the words that explain the folder go, and it
+# is applied by the same reconcile pass that shares the folder, so it reaches
+# machines that registered long before anyone wrote a label.
+by_id = {f["id"]: f for f in state["folders"]}
+
+
+def write_labels(obj):
+    with open(LABELS, "w", encoding="utf-8") as fh:
+        fh.write(obj if isinstance(obj, str) else json.dumps(obj))
+
+
+by_id["training-videos"]["label"] = "set by hand in the GUI"
+write_labels({"software-core": "Core software - the whole shelf"})
+reg.share_catalog_with({DEV})
+check("label applied from the label file",
+      by_id["software-core"].get("label") == "Core software - the whole shelf",
+      by_id["software-core"].get("label"))
+check("a folder with no entry keeps the label it has",
+      by_id["training-videos"]["label"] == "set by hand in the GUI",
+      by_id["training-videos"]["label"])
+
+# Steady state must be free: the reconciler runs every 60s forever.
+before = state["patches"]
+reg.share_catalog_with({DEV})
+check("nothing to change means nothing is written", state["patches"] == before,
+      f"{state['patches'] - before} write(s)")
+
+# Rewording is the whole point of a label, and must not need a restart.
+write_labels({"software-core": "Core software, English (large; good connection)"})
+reg.share_catalog_with({DEV})
+check("a reworded label is picked up without a restart",
+      by_id["software-core"]["label"] == "Core software, English (large; good connection)",
+      by_id["software-core"]["label"])
+
+# A half-saved edit must not blank the catalog or stop devices being admitted.
+write_labels("{ this is not json")
+reg.share_catalog_with({DEV, DEV2})
+check("a broken label file keeps the last good labels",
+      by_id["software-core"]["label"] == "Core software, English (large; good connection)",
+      by_id["software-core"]["label"])
+check("a broken label file still shares folders",
+      all(any(d["deviceID"] == DEV2 for d in f["devices"]) for f in state["folders"]))
+
+# No file at all is the normal state before LTUse writes one.
+os.remove(LABELS)
+reg.share_catalog_with({DEV, DEV2})
+check("a missing label file is not an error",
+      by_id["software-core"]["label"] == "Core software, English (large; good connection)")
 
 # admin list
 out = subprocess.run([sys.executable, os.path.join(REPO, "register.py"), "admin", "list"],

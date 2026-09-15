@@ -64,6 +64,11 @@ PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 SITE_URL = os.environ.get("SITE_URL", "https://sillsdev.github.io/langtechdepot").rstrip("/")
 AUTO_APPROVE = os.environ.get("AUTO_APPROVE", "true").lower() not in ("0", "false", "no")
 CATALOG_FOLDERS = {f.strip() for f in os.environ.get("CATALOG_FOLDERS", "").split(",") if f.strip()}
+# A folder announces itself to a client as an ID and a label, and today both
+# carry the same opaque slug. This file is where the label gets its words: a
+# JSON object of {folder id: label}. LTUse curates the catalog and this repo
+# does not, so the text lives outside the repo and is re-read while we run.
+CATALOG_LABELS = os.environ.get("CATALOG_LABELS", "/etc/langtechdepot/labels.json")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
@@ -163,40 +168,95 @@ def send_mail(to: str, subject: str, body: str) -> bool:
         return False
 
 
+_labels: dict[str, str] = {}
+_labels_stamp: tuple[int, int] | None = None
+
+
+def catalog_labels() -> dict[str, str]:
+    """{folder id: label} from CATALOG_LABELS, re-read whenever the file changes.
+
+    Curation is not a deployment. A label is text someone will want to reword
+    the moment they see it on a real client, and if that costs a service
+    restart it is a thing that never gets done. Re-read on mtime instead.
+
+    Every failure path returns the labels we last had and leaves the catalog
+    alone: a missing file is the normal state before LTUse writes one, and a
+    half-saved edit must not stop devices being shared with.
+    """
+    global _labels, _labels_stamp
+    try:
+        info = os.stat(CATALOG_LABELS)
+        stamp = (info.st_mtime_ns, info.st_size)
+    except OSError:
+        if _labels_stamp is not None:
+            print(f"[labels] {CATALOG_LABELS} is gone; keeping the labels last read",
+                  flush=True)
+            _labels_stamp = None
+        return _labels
+    if stamp == _labels_stamp:
+        return _labels
+    try:
+        with open(CATALOG_LABELS, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if not isinstance(loaded, dict):
+            raise ValueError("expected a JSON object of {folder id: label}")
+        _labels = {str(k): str(v).strip() for k, v in loaded.items() if str(v).strip()}
+        _labels_stamp = stamp
+        print(f"[labels] read {len(_labels)} label(s) from {CATALOG_LABELS}", flush=True)
+    except Exception as exc:  # noqa: BLE001 - a bad edit must not stop the reconciler
+        _labels_stamp = stamp  # complain once per edit, not once a minute
+        print(f"[labels] {CATALOG_LABELS}: {exc}", flush=True)
+    return _labels
+
+
 def catalog_folder_ids() -> list[str]:
     folders = st("GET", "/rest/config/folders") or []
     return [f["id"] for f in folders if not CATALOG_FOLDERS or f["id"] in CATALOG_FOLDERS]
 
 
 def share_catalog_with(device_ids: set[str]) -> list[str]:
-    """Add device_ids to every catalog folder's device list. PATCH replaces
-    child arrays wholesale, so read-modify-write rather than append.
-    Also ensures folder type is strictly set to 'sendonly'."""
+    """Bring every catalog folder up to what the catalog says it should be:
+    shared with device_ids, Send Only, and labelled.
+
+    PATCH replaces child arrays wholesale, so the device list is
+    read-modify-write rather than append. Only the keys that are actually wrong
+    go into the payload, so a steady state costs one GET and no writes.
+    """
+    labels = catalog_labels()
     touched = []
     for folder in st("GET", "/rest/config/folders") or []:
-        if CATALOG_FOLDERS and folder["id"] not in CATALOG_FOLDERS:
+        fid = folder["id"]
+        if CATALOG_FOLDERS and fid not in CATALOG_FOLDERS:
+            continue
+        touched.append(fid)
+
+        patch: dict = {}
+        changed: list[str] = []
+
+        missing = device_ids - {d["deviceID"] for d in folder.get("devices", [])}
+        if missing:
+            patch["devices"] = folder.get("devices", []) + [
+                {"deviceID": d} for d in sorted(missing)
+            ]
+            changed.append(f"shared with {len(missing)} more device(s)")
+
+        was = folder.get("type", "")
+        if was != "sendonly":
+            patch["type"] = "sendonly"
+            changed.append(f"type {was or 'unset'} -> sendonly")
+
+        # A folder with no entry in the label file keeps the label it has.
+        # Silence there means "not curated yet", never "blank it".
+        want = labels.get(fid)
+        if want and folder.get("label", "") != want:
+            patch["label"] = want
+            changed.append(f"label {folder.get('label', '') or 'unset'} -> {want}")
+
+        if not patch:
             continue
 
-        have = {d["deviceID"] for d in folder.get("devices", [])}
-        missing = device_ids - have
-        current_type = folder.get("type", "")
-
-        # Trigger an update if there are missing devices OR if the type isn't sendonly
-        if not missing and current_type == "sendonly":
-            touched.append(folder["id"])
-            continue
-
-        new_devices = folder.get("devices", []) + [{"deviceID": d} for d in sorted(missing)]
-
-        # Build the PATCH payload incorporating both the updated devices and the type constraint
-        patch_payload = {
-            "devices": new_devices,
-            "type": "sendonly"
-        }
-
-        print(f"[reconcile] Flipped {folder['id']} to sendonly because it was {current_type}", flush=True)
-        st("PATCH", f"/rest/config/folders/{folder['id']}", patch_payload)
-        touched.append(folder["id"])
+        st("PATCH", f"/rest/config/folders/{fid}", patch)
+        print(f"[reconcile] {fid}: {', '.join(changed)}", flush=True)
     return touched
 
 
