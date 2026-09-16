@@ -57,8 +57,7 @@ you pack. Continuous sync solves the forgetting; it does not solve the not-knowi
 *That may be so for some program that we have invented, but the SyncThing GUI shows us when the folders we have selected are up-to-date.*
 ![Screenshot of folders partly updated](./images/Folders-partly-updated.jpg)
 
-*When all show "Up to Date", you are good to go. If we want people to use our program instead of the SyncThing GUI, yes, more work is needed. JimH44
-*
+*When all show "Up to Date", you are good to go. If we want people to use our program instead of the SyncThing GUI, yes, more work is needed. JimH44*
 
 ### G2 — You have the thing you didn't know you'd need
 
@@ -70,7 +69,8 @@ brings its whole contents. Taking more than you think you need is the default po
 **Gap.** Nothing makes the catalog legible *before* you need it. A folder announces
 itself with an ID and nothing else — no description of what is inside, no way to tell
 from the list whether the thing you half-remember hearing about is in there.
-This Gap is not correct. All shares now have a brief description of the contents, such as "Apps to install on an Android device" as well as the short name, "Android_apps" in this case.  
+
+*This Gap is not correct. All shares now have a brief description of the contents, such as "Apps to install on an Android device" as well as the short name, "Android_apps" in this case.*
 
 ### G3 — It lands where you want it, including a thumb drive
 
