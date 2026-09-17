@@ -4,6 +4,7 @@
 DATE=$(date +%Y-%m-%d_%H%M%S)
 BACKUP_DIR="/data/LT/Backups/ClientsHowto"
 BACKUP_FILE="$BACKUP_DIR/register_${DATE}.db"
+umask 027
 
 # Safely extract a pristine snapshot using SQLite's backup engine
 sqlite3 /var/lib/langtechdepot/register.db ".backup '${BACKUP_FILE}'"
