@@ -70,14 +70,14 @@ brings its whole contents. Taking more than you think you need is the default po
 itself with an ID and nothing else — no description of what is inside, no way to tell
 from the list whether the thing you half-remember hearing about is in there.
 
-*This Gap is not correct. All shares now have a brief description of the contents, such as "Apps to install on an Android device" as well as the short name, "Android_apps" in this case.*
+*This Gap is no longer correct. All shares now have a brief description of the contents, such as "Apps to install on an Android device" as well as the short name, "Android_apps" in this case. JimH44*
 
 ### G3 — It lands where you want it, including a thumb drive
 
 The default is a folder on your computer, but the user should be able to point it
 somewhere else — most usefully at a removable drive they can carry or lend.
 
-*When we select folders using the SyncThing GUI, we do have the option of choosing where each folder goes, and what it is called.*
+*When we select folders using the SyncThing GUI, we do have the option of choosing where each folder goes, and what it is called. JimH44*
 
 **Today.** The destination is a fixed root: `%USERPROFILE%\LangTechDepot` on Windows,
 `$HOME/LangTechDepot` on Linux.
@@ -100,7 +100,7 @@ came for.
 could search with Ctrl-F and then walk back up to the folder. Finding a known filename
 now means opening folders until you hit it.
 
-*Not true. The main folders that people would select contain copies of the file "LangTranDepotFiles.txt", which lists all files in the repo, from the perspective of the kind of software that it is (ie. the Groups folder view). Perhaps this should be adapted to show the folders from the perspective of the kind of user (ie. the BTSync folder view.)*
+*No longer true. A folder called All_Contents is now shared, which contains a copy of the file "LangTranDepotFiles.txt" that makes it easy to see which folder any file is in. It lists all files in the repo. JimH44*
 
 ### G5 — A centre mirrors once; everyone else pulls over the LAN
 
@@ -128,6 +128,8 @@ the folders offered. `CATALOG_FOLDERS` can narrow what the server offers, global
 assignment and none is intended — a list that fails to explain itself has no fallback,
 because nothing else ever tells the user what a folder holds.
 
+*The last clause above is no longer true. Every folder now comes with a terse description of its contents, and a folder called All_Contents is now shared, which contains a version of LangTechDepotFiles.txt that is made from the LTSync perspective, ie. organised by kind of user. JimH44*
+
 > G2 and G6 pull against each other on purpose: **take more than you think you need**,
 > *and* **make the choice obvious**. Both land on the same surface — the list of folders
 > at step 4 — which is why folder IDs being permanent and legible is a design rule and
@@ -152,6 +154,8 @@ benefit from should be able to say so.
 
 **Today.** Nothing. LTUse curates the folder contents; there is no path from a user back
 to them.
+
+*When the email address, perhaps depot@langtech.cloud, becomes usable, people will be able to make suggestions to that address, and I will notice. This could be advertised on the web pages. JimH44*
 
 **Gap.** Complete. Nothing on the site, in `register.py`, or in either installer accepts
 a suggestion. This is the only goal here with no implementation at all.
@@ -178,7 +182,7 @@ merely obeyed.
   them. (G7)
 - **Folder IDs are what users read.** They are permanent and must be legible to a
   non-technical person scanning a list. Renaming a published one breaks every
-  `langtechdepot-subscribe` invocation and every user's mental map. (G2, G6)
+  `langtechdepot-subscribe` invocation and every user's mental map. (G2, G6) *Folders now come with short descriptions as well. JimH44*
 - **Keep `/files` a bare tree.** Do not put a catalog browser, search UI or landing page
   in front of it; that reintroduces exactly the page weight it exists to avoid. The right
   answer to G4's missing manifest is a plain text file, not an application. (G4)
