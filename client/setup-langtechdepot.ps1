@@ -1,227 +1,385 @@
-<#
-LangTechDepot installer (Windows).
+# LangTechDepot installer (Windows 11 PowerShell).
+#
+# Installs Syncthing, registers this machine with the LangTechDepot server 
+# using the token you were issued, auto-subscribes to All_Contents_List, 
+# and lets you choose folders to install or ignore. 
+# Idempotent.
 
-Installs Syncthing, registers this machine with the LangTechDepot server using the
-token you were issued, and leaves you at the folder catalog. Idempotent.
+$ErrorActionPreference = "Stop"
 
-Double-click run-setup-langtechdepot.bat, which runs this script the one way a
-stock Windows machine allows. Right-clicking this file and choosing "Run with
-PowerShell" does not work on a machine whose execution policy has not been
-changed - the window closes before the reason is readable.
+# Path definitions
+$REGISTER_URL = 'https://depot.langtech.cloud'$HELP_URL     = 'https://sillsdev.github.io/langtechdepot/help.html'
 
-To run it by hand instead:
+$DATA_ROOT   = Join-Path$HOME "LangTechDepot"
+$BIN_DIR     = Join-Path$HOME ".local\bin"
+$BIN         = Join-Path$BIN_DIR "syncthing.exe"
 
-    powershell -ExecutionPolicy Bypass -File .\setup-langtechdepot.ps1
+New-Item -ItemType Directory -Force -Path $DATA_ROOT,$BIN_DIR | Out-Null
 
-No token yet? Register at the URL below and one is emailed to you.
-#>
-
-param(
-    # Skip the "Press Enter to close" pause. Used by
-    # run-setup-langtechdepot.bat, which pauses itself so the user is not asked
-    # twice, and by unattended runs. Do not pass it when a person runs this
-    # script directly: that pause is the one thing standing between a field user
-    # and an error message that vanishes with the window.
-    [switch]$NoPause
-)
-
-$ErrorActionPreference = 'Stop'
-
-$RegisterUrl = 'https://depot.langtech.cloud'
-# Where a stuck user is sent. The registration form answers "I have no token";
-# it does not answer "it failed", and those are different people.
-$HelpUrl     = 'https://sillsdev.github.io/langtechdepot/help.html'
-
-$HomeDir  = Join-Path $env:LOCALAPPDATA 'LangTechDepot\config'
-$DataRoot = Join-Path $env:USERPROFILE 'LangTechDepot'
-$GuiUrl   = 'http://127.0.0.1:8384'
-
-function Wait-BeforeClosing {
-    if ($NoPause) { return }
-    Write-Host ''
-    Read-Host 'Press Enter to close this window' | Out-Null
-}
-
-# Right-click "Run with PowerShell" closes the console the instant the script
-# ends, so without this an error is on screen for a few milliseconds and then
-# gone. Catches anything terminating, anywhere, including inside functions.
-trap {
-    Write-Host ''
-    Write-Host 'Setup did not finish:' -ForegroundColor Red
-    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host ''
-    Write-Host 'Nothing is half-installed - running this script again is safe.'
-    Write-Host "For help, copy the message above and take it to $HelpUrl"
-    Wait-BeforeClosing
-    exit 1
-}
-
-New-Item -ItemType Directory -Force $HomeDir, $DataRoot | Out-Null
-
-# Syncthing is installed by winget or placed here by hand, never fetched by
-# this script: antivirus dropper heuristics flag scripts that pull down an
-# executable and then register it for startup.
-function Find-Syncthing {
-    # 1. Beside this script - the documented route for machines without winget.
-    $local = Join-Path $PSScriptRoot 'syncthing.exe'
-    if (Test-Path $local) { return $local }
-
-    # 2. On PATH. The persisted PATH is checked as well as this process's copy,
-    #    because a winget install in this same session edits the registry and a
-    #    running process never sees that. Without it, "Successfully installed"
-    #    is followed immediately by "Syncthing not found".
-    $cmd = Get-Command syncthing.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    $persisted = @(
-        [Environment]::GetEnvironmentVariable('Path', 'Machine')
-        [Environment]::GetEnvironmentVariable('Path', 'User')
-    ) -join ';'
-    foreach ($dir in $persisted -split ';') {
-        if (-not $dir.Trim()) { continue }
-        $candidate = Join-Path $dir.Trim().Trim('"') 'syncthing.exe'
-        if (Test-Path $candidate) { return $candidate }
+# Prefer a system-wide installed Syncthing if present
+$systemSyncthing = Get-Command "syncthing" -ErrorAction SilentlyContinue
+if ($systemSyncthing) {
+    $BIN =$systemSyncthing.Source
+} elseif (-not (Test-Path $BIN)) {
+    Write-Host "Downloading Syncthing for Windows..."
+    
+    $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/syncthing/syncthing/releases/latest"
+    $asset = $releaseInfo.assets \vert{} Where-Object {$_.name -like "syncthing-windows-amd64-*.zip" } | Select-Object -First 1
+    
+    if (-not $asset) {
+        Write-Error "Failed to find suitable Syncthing Windows 64-bit release."
+        exit 1
     }
 
-    # 3. winget's own locations. Syncthing ships as a zip, so winget extracts it
-    #    under Packages\ and, depending on the winget version, may or may not
-    #    also leave an alias in Links\. Check both, newest build first.
-    $shim = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\syncthing.exe'
-    if (Test-Path $shim) { return $shim }
-    $packages = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
-    if (Test-Path $packages) {
-        $found = Get-ChildItem $packages -Filter 'syncthing.exe' -Recurse -File -ErrorAction SilentlyContinue |
-                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($found) { return $found.FullName }
-    }
+    $zipPath = Join-Path$env:TEMP "syncthing.zip"
+    $extractPath = Join-Path$env:TEMP "syncthing_extract"
 
-    return $null
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile$zipPath
+    Expand-Archive -Path $zipPath -DestinationPath$extractPath -Force
+
+    $extractedExe = Get-ChildItem -Path$extractPath -Filter "syncthing.exe" -Recurse | Select-Object -First 1
+    Move-Item -Path $extractedExe.FullName -Destination$BIN -Force
+
+    Remove-Item -Path $zipPath,$extractPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$Exe = Find-Syncthing
-if (-not $Exe) {
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host 'Installing Syncthing via winget...'
-        winget install --id Syncthing.Syncthing --silent --accept-source-agreements --accept-package-agreements
-        $Exe = Find-Syncthing
-        if (-not $Exe) {
-            throw ("winget reported success but syncthing.exe still cannot be found. " +
-                   "Close this window, open a new one, and run the script again - a fresh " +
-                   "window picks up the PATH winget just changed. If that still fails, get " +
-                   "Syncthing from https://syncthing.net/downloads/, put syncthing.exe next " +
-                   "to this script, and re-run.")
-        }
-    }
-    if (-not $Exe) {
-        throw ("Syncthing is not installed and winget is not available on this machine. " +
-               "Get Syncthing from https://syncthing.net/downloads/, put syncthing.exe next " +
-               "to this script, and re-run.")
-    }
+Write-Host "Using Syncthing at $BIN"
+
+# State and config pathing pinned with --home
+$CONFIG_DIR   = Join-Path$HOME ".local\state\langtechdepot"
+$CATALOG_FILE = Join-Path$DATA_ROOT "All_Contents_List\LangTechDepotFiles.txt"
+
+New-Item -ItemType Directory -Force -Path $CONFIG_DIR | Out-Null
+
+$configFile = Join-Path$CONFIG_DIR "config.xml"
+if (-not (Test-Path $configFile)) {
+    Start-Process -FilePath $BIN -ArgumentList "generate", "--home", "`"$CONFIG_DIR`"" -NoNewWindow -Wait
 }
-Write-Host "Using Syncthing at $Exe"
 
-# No --no-default-folder: Syncthing 2.0 removed that flag along with the
-# "Default Folder" it used to suppress, so passing it is a hard error
-# ("unknown flag --no-default-folder") and nothing is left to suppress.
-if (-not (Test-Path (Join-Path $HomeDir 'config.xml'))) {
-    & $Exe generate --home $HomeDir | Out-Null
+# -----------------------------------------------------------------------------
+# Background Persistence Setup (Windows Task Scheduler)
+# -----------------------------------------------------------------------------
+$taskName = "LangTechDepot_Syncthing"
+$existingTask = Get-ScheduledTask -TaskName$taskName -ErrorAction SilentlyContinue
+
+if (-not $existingTask) {
+    Write-Host "Setting up background startup task for LangTechDepot..."
+    $action = New-ScheduledTaskAction -Execute$BIN -Argument "serve --no-browser --home `"$CONFIG_DIR`""
+    $trigger = New-ScheduledTaskTrigger -AtLogOn$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
+    Register-ScheduledTask -TaskName $taskName -Action$action -Trigger $trigger -Settings$settings -Description "LangTechDepot Syncthing Service" | Out-Null
 }
-$ApiKey = ([xml](Get-Content (Join-Path $HomeDir 'config.xml'))).configuration.gui.apikey
-$Headers = @{ 'X-API-Key' = $ApiKey }
 
-# Start at logon through Task Scheduler - per-user, no service install, no admin.
-$TaskName = 'LangTechDepot'
-$action  = New-ScheduledTaskAction -Execute $Exe -Argument "serve --no-console --no-browser --home `"$HomeDir`""
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-Start-ScheduledTask -TaskName $TaskName
-
-Write-Host 'Waiting for Syncthing...'
-$deadline = (Get-Date).AddSeconds(60)
-$lastStatus = $null
-while ($true) {
-    try { Invoke-RestMethod "$GuiUrl/rest/system/status" -Headers $Headers | Out-Null; break }
-    catch {
-        if ($_.Exception.Response) { $lastStatus = [int]$_.Exception.Response.StatusCode }
-        if ((Get-Date) -gt $deadline) {
-            # A Syncthing started by hand holds the same port and answers with a
-            # different API key, which looks nothing like "did not start".
-            if ($lastStatus -eq 401 -or $lastStatus -eq 403) {
-                throw ("another Syncthing already has $GuiUrl and it is not this one - it " +
-                       "rejected our API key. Close that Syncthing (look in the system tray, " +
-                       "or the console window you started it from) and run this script again.")
-            }
-            throw 'Syncthing did not start within 60s.'
-        }
-        Start-Sleep 2
+# Start Syncthing if it isn't running via task
+$syncthingProcess = Get-Process -Name "syncthing" -ErrorAction SilentlyContinue
+if (-not $syncthingProcess) {
+    Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    # Fallback to direct process launch if task execution was denied/failed
+    if (-not (Get-Process -Name "syncthing" -ErrorAction SilentlyContinue)) {
+        Start-Process -FilePath $BIN -ArgumentList "serve", "--no-browser", "--home", "`"$CONFIG_DIR`"" -WindowStyle Hidden
     }
 }
 
-$MyId = (Invoke-RestMethod "$GuiUrl/rest/system/status" -Headers $Headers).myID
-$DeviceName = "$env:USERNAME-$env:COMPUTERNAME"
+# Read XML Config
+[xml]$xml = Get-Content -Path$configFile
+$API_KEY  =$xml.configuration.gui.apikey
+$GUI_ADDR =$xml.configuration.gui.address
+$GUI_URL  = "http://$GUI_ADDR"
 
-# Name this device for the cluster. It deliberately carries no token: Syncthing
-# broadcasts device names to every peer, so a token here would leak to them all.
-Invoke-RestMethod -Method Patch "$GuiUrl/rest/config/devices/$MyId" -Headers $Headers -ContentType 'application/json' `
-    -Body (@{ name = $DeviceName } | ConvertTo-Json) | Out-Null
+$headers = @{
+    "X-API-Key" = $API_KEY
+}
 
-Write-Host ''
-Write-Host "This machine's device ID: $MyId"
-Write-Host "No token yet? Register at $RegisterUrl"
-Write-Host ''
+# Helper function for Syncthing REST API interactions
+function Invoke-SyncthingApi {
+    param(
+        [string]$Method,
+        [string]$Path,
+        [object]$Body =$null
+    )
+    $uri = "$GUI_URL$Path"
+    $params = @{
+        Uri     = $uri
+        Method  = $Method
+        Headers = $headers
+    }
+    if ($Body) {$params["ContentType"] = "application/json"
+        $params["Body"]        = ($Body | ConvertTo-Json -Depth 10 -Compress)
+    }
+    return Invoke-RestMethod @params
+}
 
-$Registration = $null
-foreach ($attempt in 1..3) {
-    $token = (Read-Host 'Paste your LangTechDepot token').Trim()
-    if (-not $token) { Write-Host 'Nothing entered.'; continue }
-
-    $payload = @{ token = $token; deviceID = $MyId; deviceName = $DeviceName } | ConvertTo-Json
+Write-Host "Waiting for Syncthing to answer at $GUI_URL..."
+$connected =$false
+for ($i = 0; $i -lt 30; $i++) {
     try {
-        $Registration = Invoke-RestMethod -Method Post "$RegisterUrl/register" `
-            -ContentType 'application/json' -Body $payload
-        break
+        $status = Invoke-SyncthingApi -Method "GET" -Path "/rest/system/status"
+        if ($status) { $connected =$true; break }
     } catch {
-        $reason = 'could not reach the registration server'
-        if ($_.ErrorDetails.Message) {
-            try { $reason = ($_.ErrorDetails.Message | ConvertFrom-Json).error } catch { }
-        }
-        Write-Host "Registration failed: $reason"
-        if ($attempt -lt 3) { Write-Host 'Try again.' }
+        Start-Sleep -Seconds 2
     }
 }
 
-if (-not $Registration) {
-    Write-Host ''
-    Write-Host 'Giving up after 3 attempts. Syncthing is installed and running; re-run this'
-    Write-Host "script once you have a working token. Ask for help at $HelpUrl"
-    Wait-BeforeClosing
+if (-not $connected) {
+    Write-Error "Syncthing did not respond at $GUI_URL within 60s."
     exit 1
 }
 
-# The server tells us its own identity, so nothing about it is hardcoded here.
-# introducer=true: the server introduces us to other field machines, so they
-# swarm with each other instead of every download crossing the ocean.
+$MY_ID =$status.myID
+$DEVICE_NAME = "$env:USERNAME-$env:COMPUTERNAME"
+
+# Update local device name
+$patchBody = @{ name =$DEVICE_NAME }
+Invoke-SyncthingApi -Method "PATCH" -Path "/rest/config/devices/$MY_ID" -Body $patchBody | Out-Null
+
+Write-Host ""
+Write-Host "This machine's device ID: $MY_ID"
+
+# -----------------------------------------------------------------------------
+# Check Server Registration
+# -----------------------------------------------------------------------------
+$SERVER_ID = ""
 try {
-    Invoke-RestMethod -Method Post "$GuiUrl/rest/config/devices" -Headers $Headers -ContentType 'application/json' `
-        -Body (@{
-            deviceID   = $Registration.serverDeviceID
-            name       = 'LangTechDepot Server'
-            addresses  = @($Registration.serverAddresses)
-            introducer = $true
-        } | ConvertTo-Json) | Out-Null
-} catch {
-    Write-Host 'Server device was already configured; leaving it as is.'
+    $devices = Invoke-SyncthingApi -Method "GET" -Path "/rest/config/devices"
+    foreach ($dev in$devices) {
+        if ($dev.name -eq "LangTechDepot Server") {
+            $SERVER_ID =$dev.deviceID
+            break
+        }
+    }
+} catch {}
+
+if ($SERVER_ID) {
+    Write-Host "Already registered with LangTechDepot Server."
+} else {
+    Write-Host "No token yet? Register at $REGISTER_URL"
+    Write-Host ""
+
+    $regSuccess =$false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {$TOKEN = Read-Host "Paste your LangTechDepot token"
+        $TOKEN =$TOKEN.Trim()
+        
+        if ([string]::IsNullOrWhiteSpace($TOKEN)) {
+            Write-Host "Nothing entered."
+            continue
+        }
+
+        $regBody = @{
+            token      = $TOKEN
+            deviceID   = $MY_ID
+            deviceName = $DEVICE_NAME
+        } | ConvertTo-Json
+
+        try {
+            $response = Invoke-RestMethod -Uri "$REGISTER_URL/register" -Method "POST" -ContentType "application/json" -Body $regBody
+            Write-Host ""
+            Write-Host "Registered."
+            $regSuccess =$true
+            break
+        } catch {
+            $errorDetails =$_.Exception.Response
+            $reason = "registration failed"
+            if ($errorDetails) {
+                try {
+                    $reader = New-Object System.IO.StreamReader($errorDetails.GetResponseStream())
+                    $jsonErr =$reader.ReadToEnd() | ConvertFrom-Json
+                    if ($jsonErr.error) { $reason =$jsonErr.error }
+                } catch {}
+            }
+            Write-Host "Registration failed: $reason"
+            if ($attempt -lt 3) { Write-Host "Try again." }
+        }
+    }
+
+    if (-not $regSuccess) {
+        Write-Host ""
+        Write-Host "Giving up after 3 attempts. Syncthing is installed and running; re-run this"
+        Write-Host "script once you have a working token. Ask for help at $HELP_URL"
+        exit 1
+    }
+
+    $SERVER_ID    =$response.serverDeviceID
+    $SERVER_ADDRS =$response.serverAddresses
+
+    $devConfig = @{
+        deviceID   = $SERVER_ID
+        name       = "LangTechDepot Server"
+        addresses  = $SERVER_ADDRS
+        introducer = $true
+    }
+    
+    try {
+        Invoke-SyncthingApi -Method "POST" -Path "/rest/config/devices" -Body $devConfig | Out-Null
+    } catch {}
 }
 
-# Receive-only: a stray local edit gets flagged and reverted, never propagated.
-Invoke-RestMethod -Method Patch "$GuiUrl/rest/config/defaults/folder" -Headers $Headers -ContentType 'application/json' `
-    -Body (@{ type = 'receiveonly'; path = $DataRoot } | ConvertTo-Json) | Out-Null
+# Set default folder creation mode to receiveonly
+$defaultFolderPatch = @{
+    type = "receiveonly"
+    path = $DATA_ROOT
+}
+Invoke-SyncthingApi -Method "PATCH" -Path "/rest/config/defaults/folder" -Body $defaultFolderPatch | Out-Null
 
-Write-Host ''
-Write-Host 'Registered.'
-Write-Host "Sync data root: $DataRoot"
-Write-Host 'The folder catalog will appear within a minute or two.'
-Write-Host 'Click Add on the folders you want in the browser window that opens.'
-Start-Process $GuiUrl
-Wait-BeforeClosing
+# -----------------------------------------------------------------------------
+# AUTO-SUBSCRIBE: All_Contents_List
+# -----------------------------------------------------------------------------
+$AUTO_FOLDER_ID   = "All_Contents_List"
+$AUTO_FOLDER_PATH = Join-Path $DATA_ROOT$AUTO_FOLDER_ID
+
+Write-Host "Subscribing to $AUTO_FOLDER_ID..."
+New-Item -ItemType Directory -Force -Path $AUTO_FOLDER_PATH | Out-Null
+
+$autoFolderPayload = @{
+    id               = $AUTO_FOLDER_ID
+    label            = "All_Contents_List -- a list of all files available"
+    path             = $AUTO_FOLDER_PATH
+    type             = "receiveonly"
+    rescanIntervalS  = 3600
+    fsWatcherEnabled = $true
+    devices          = @(@{ deviceID = $SERVER_ID })
+}
+
+try {
+    Invoke-SyncthingApi -Method "POST" -Path "/rest/config/folders" -Body $autoFolderPayload | Out-Null
+} catch {}
+
+Write-Host "Sync data root: $DATA_ROOT"
+Write-Host "Automatically subscribed to: $AUTO_FOLDER_ID"
+Write-Host "The folder catalog will appear within a minute or two."
+
+# Wait for catalog sync
+Write-Host "Waiting for catalog file to sync from server..."
+while ((-not (Test-Path $CATALOG_FILE)) -or ((Get-Item$CATALOG_FILE).Length -eq 0)) {
+    Start-Sleep -Seconds 2
+}
+
+# -----------------------------------------------------------------------------
+# Parse Catalog & Get Live Ignored Folders
+# -----------------------------------------------------------------------------
+$ignored = [System.Collections.Generic.HashSet[string]]::new()
+try {
+    $devCfg = Invoke-SyncthingApi -Method "GET" -Path "/rest/config/devices/$SERVER_ID"
+    if ($devCfg.ignoredFolders) {
+        foreach ($item in$devCfg.ignoredFolders) {
+            if ($item.id) { [void]$ignored.Add($item.id) }
+        }
+    }
+} catch {}
+
+$availableFolders = @()
+$inFoldersSection =$false
+
+foreach ($line in Get-Content -Path$CATALOG_FILE) {
+    $line =$line.Trim()
+    
+    if ($line -like "*Folders available, with their sizes*") {
+        $inFoldersSection =$true
+        continue
+    }
+    if ($line -like "*Individual files available*") {
+        break
+    }
+    if (-not $inFoldersSection -or [string]::IsNullOrWhiteSpace($line)) {
+        continue
+    }
+
+    # Match Regex: Size, Folder_ID, "Description"
+    if ($line -match '^\s*(\S+)\s+(\S+)\s+"(.*)"\s*$') {
+        $size =$matches[1]
+        $fid  =$matches[2]
+        $desc =$matches[3]
+
+        if (-not $ignored.Contains($fid)) {$availableFolders += [PSCustomObject]@{
+                "Folder ID"   = $fid
+                "Size"        = $size
+                "Description" = $desc
+            }
+        }
+    }
+}
+
+if ($availableFolders.Count -eq 0) {
+    Write-Host "No new folders available to display."
+    exit 0
+}
+
+# -----------------------------------------------------------------------------
+# Display Selection GUI via Out-GridView (Native Windows Dialog)
+# -----------------------------------------------------------------------------
+Write-Host "Displaying selection window..."
+$selectedFolders =$availableFolders | Out-GridView `
+    -Title "LangTechDepot - Select Folders to SUBSCRIBE (+). Unselected folders will be IGNORED (-)" `
+    -OutputMode Multiple
+
+# Build selection lookup
+$selectedIDs = [System.Collections.Generic.HashSet[string]]::new()
+if ($selectedFolders) {
+    foreach ($item in$selectedFolders) {
+        [void]$selectedIDs.Add($item."Folder ID")
+    }
+}
+
+# Process results
+foreach ($folder in$availableFolders) {
+    $fid  =$folder."Folder ID"
+    $desc =$folder."Description"
+
+    # 1. SUBSCRIBE (+)
+    if ($selectedIDs.Contains($fid)) {
+        $folderPath = Join-Path$DATA_ROOT $fid$folderPayload = @{
+            id               = $fid
+            label            = $desc
+            path             = $folderPath
+            type             = "receiveonly"
+            rescanIntervalS  = 3600
+            fsWatcherEnabled = $true
+            devices          = @(@{ deviceID = $SERVER_ID })
+        }
+        try {
+            Invoke-SyncthingApi -Method "POST" -Path "/rest/config/folders" -Body $folderPayload | Out-Null
+            Write-Host "Successfully subscribed to: $fid"
+        } catch {
+            Write-Host "Failed to subscribe to $fid:$_"
+        }
+    } 
+    # 2. IGNORE (-)
+    else {
+        try {
+            $devConfig = Invoke-SyncthingApi -Method "GET" -Path "/rest/config/devices/$SERVER_ID"
+            
+            if (-not $devConfig.ignoredFolders) {$devConfig | Add-Member -MemberType NoteProperty -Name "ignoredFolders" -Value @()
+            }
+
+            $alreadyExists =$false
+            foreach ($item in$devConfig.ignoredFolders) {
+                if ($item.id -eq$fid) { $alreadyExists =$true; break }
+            }
+
+            if (-not $alreadyExists) {$nowStr = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                $newItem = @{
+                    id    = $fid
+                    label = $desc
+                    time  = $nowStr
+                }
+                
+                # Append to array
+                $devConfig.ignoredFolders +=$newItem
+
+                Invoke-SyncthingApi -Method "PUT" -Path "/rest/config/devices/$SERVER_ID" -Body $devConfig | Out-Null
+                Write-Host "Successfully ignored folder via API: $fid"
+            } else {
+                Write-Host "Folder already marked as ignored: $fid"
+            }
+        } catch {
+            Write-Host "Warning: Could not ignore $fid via API:$_"
+        }
+    }
+}
+
+Write-Host " "
+Write-Host "If you later need to manage the SyncThing system directly,"
+Write-Host "open $GUI_URL."
+Write-Host "Then if you want to unignore a folder,"
+Write-Host "open the Actions menu at the top-right, click Settings"
+Write-Host "and then Ignored Folders."
+Write-Host "Then you can click Add on any additional folders you want."
+
