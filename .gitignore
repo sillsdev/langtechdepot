@@ -10,3 +10,4 @@ docs/_preview/
 # temporary files from AI, for merging into tracked files
 */new*.sh
 */new*.ps1
+*/.setup*.ps1
