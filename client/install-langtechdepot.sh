@@ -137,7 +137,7 @@ try:
         devices = json.loads(resp.read().decode('utf-8'))
         for dev in devices:
             # Match specifically on the LangTechDepot Server name
-            if dev.get('name') == \"$SERVER_ID\":
+            if dev.get('name') == 'LangTechDepot Server':
                 print(dev.get('deviceID', ''))
                 break
 except Exception:
@@ -146,7 +146,7 @@ except Exception:
 
 if [ -n "$EXISTING_SERVER_ID" ]; then
     echo "Already registered with LangTechDepot Server."
-    # SERVER_ID="$EXISTING_SERVER_ID"
+    SERVER_ID="$EXISTING_SERVER_ID"
 else
     # Not yet registered with LangTechDepot -> Prompt for token
     echo "No token yet? Register at $REGISTER_URL"
