@@ -55,7 +55,6 @@ STATE_HOME="$HOME/.local/state"
 case "${XDG_STATE_HOME:-}" in /*) STATE_HOME="$XDG_STATE_HOME";; esac  # Syncthing ignores a relative one
 CONFIG_DIR="$STATE_HOME/langtechdepot"
 CATALOG_FILE="$DATA_ROOT/All_Contents_List/LangTechDepotFiles.txt"
-IGNORE_FILE="$CONFIG_DIR/ignored_folders.txt"
 
 # No --no-default-folder: Syncthing 2.0 removed that flag along with the
 # "Default Folder" it used to suppress, so passing it is a hard error
@@ -68,7 +67,6 @@ API_KEY=$(xmlstarlet sel -t -v "//configuration/gui/apikey" "$HOME/.config/synct
 SERVER_ID="LangTechDepot Server"
 
 mkdir -p "$CONFIG_DIR"
-touch "$IGNORE_FILE"
 
 # Per-user unit: no root needed, and lingering keeps it syncing when logged out.
 mkdir -p "$HOME/.config/systemd/user"
@@ -204,8 +202,6 @@ echo 'The folder catalog will appear within a minute or two.'
 
 # Path to the synced catalog file inside All_Contents_List
 CATALOG_FILE="$DATA_ROOT/All_Contents_List/LangTechDepotFiles.txt"
-IGNORE_FILE="$CONFIG_DIR/ignored_folders.txt"
-touch "$IGNORE_FILE"
 
 echo "Waiting for catalog file to sync from server..."
 while [ ! -s "$CATALOG_FILE" ]; do
@@ -309,7 +305,6 @@ data_root = sys.argv[2]
 server_id = sys.argv[3]
 gui_url = sys.argv[4]
 api_key = sys.argv[5]
-ignore_file = sys.argv[6]
 
 with open(selections_file, 'r') as f:
     lines = [line.strip() for line in f if line.strip()]
@@ -396,7 +391,7 @@ for line in lines:
 
             except Exception as e:
                 print(f'Warning: Could not ignore {fid} via API: {e}')
-" "$SELECTIONS_FILE" "$DATA_ROOT" "$SERVER_ID" "$GUI_URL" "$API_KEY" "$IGNORE_FILE"
+" "$SELECTIONS_FILE" "$DATA_ROOT" "$SERVER_ID" "$GUI_URL" "$API_KEY"
 
 rm -f "$SELECTIONS_FILE"
 
