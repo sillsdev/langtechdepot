@@ -121,49 +121,82 @@ api PATCH "/rest/config/devices/$MY_ID" "{\"name\": \"$DEVICE_NAME\"}" >/dev/nul
 
 echo
 echo "This machine's device ID: $MY_ID"
-echo "No token yet? Register at $REGISTER_URL"
-echo
 
-RESPONSE=''
-for attempt in 1 2 3; do
-    read -r -p 'Paste your LangTechDepot token: ' TOKEN
-    TOKEN=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
-    [ -n "$TOKEN" ] || { echo 'Nothing entered.'; continue; }
+# -----------------------------------------------------------------------------
+# Check if registered specifically with the LangTechDepot Server
+# -----------------------------------------------------------------------------
+EXISTING_SERVER_ID=$(python3 -c "
+import sys, json, urllib.request
 
-    if RESPONSE=$(curl -fsS -X POST -H 'Content-Type: application/json' \
-        -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
-        "$REGISTER_URL/register" 2>/dev/null); then
-        break
-    fi
-    # curl -f swallows the body on 4xx, so ask again without it for the reason.
-    REASON=$(curl -sS -X POST -H 'Content-Type: application/json' \
-        -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
-        "$REGISTER_URL/register" 2>/dev/null |
-        python3 -c "import json,sys; print(json.load(sys.stdin).get('error','registration failed'))" 2>/dev/null || echo 'could not reach the registration server')
-    echo "Registration failed: $REASON"
-    RESPONSE=''
-    [ "$attempt" -lt 3 ] && echo 'Try again.'
-done
+gui_url = sys.argv[1]
+api_key = sys.argv[2]
 
-if [ -z "$RESPONSE" ]; then
+try:
+    req = urllib.request.Request(f'{gui_url}/rest/config/devices', headers={'X-API-Key': api_key})
+    with urllib.request.urlopen(req) as resp:
+        devices = json.loads(resp.read().decode('utf-8'))
+        for dev in devices:
+            # Match specifically on the LangTechDepot Server name
+            if dev.get('name') == \"$SERVER_ID\":
+                print(dev.get('deviceID', ''))
+                break
+except Exception:
+    pass
+" "$GUI_URL" "$API_KEY")
+
+if [ -n "$EXISTING_SERVER_ID" ]; then
+    echo "Already registered with LangTechDepot Server."
+    # SERVER_ID="$EXISTING_SERVER_ID"
+else
+    # Not yet registered with LangTechDepot -> Prompt for token
+    echo "No token yet? Register at $REGISTER_URL"
     echo
-    echo "Giving up after 3 attempts. Syncthing is installed and running; re-run this"
-    echo "script once you have a working token. Ask for help at $HELP_URL"
-    exit 1
+
+    RESPONSE=''
+    for attempt in 1 2 3; do
+	read -r -p 'Paste your LangTechDepot token: ' TOKEN
+	TOKEN=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
+	[ -n "$TOKEN" ] || { echo 'Nothing entered.'; continue; }
+
+	if RESPONSE=$(curl -fsS -X POST -H 'Content-Type: application/json' \
+	    -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
+	    "$REGISTER_URL/register" 2>/dev/null); then
+	    echo
+	    echo 'Registered.'
+	    break
+	fi
+
+	# curl -f swallows the body on 4xx, so ask again without it for the reason.
+	REASON=$(curl -sS -X POST -H 'Content-Type: application/json' \
+	    -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
+	    "$REGISTER_URL/register" 2>/dev/null |
+	    python3 -c "import json,sys; print(json.load(sys.stdin).get('error','registration failed'))" 2>/dev/null || echo 'could not reach the registration server')
+	echo "Registration failed: $REASON"
+	RESPONSE=''
+	[ "$attempt" -lt 3 ] && echo 'Try again.'
+    done
+
+    if [ -z "$RESPONSE" ]; then
+	echo
+	echo "Giving up after 3 attempts. Syncthing is installed and running; re-run this"
+	echo "script once you have a working token. Ask for help at $HELP_URL"
+	exit 1
+    fi
+
+    # The server tells us its own identity, so nothing about it is hardcoded here.
+    # Extract server ID and register the server device in Syncthing
+    SERVER_ID=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin)['serverDeviceID'])")
+    SERVER_ADDRS=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['serverAddresses']))")
+
+    # introducer=true: the server introduces us to other field machines, so they
+    # swarm with each other instead of every download crossing the ocean.
+    api POST /rest/config/devices "{
+      \"deviceID\": \"$SERVER_ID\",
+      \"name\": \"LangTechDepot Server\",
+      \"addresses\": $SERVER_ADDRS,
+      \"introducer\": true
+    }" >/dev/null 2>&1 || true
 fi
-
-# The server tells us its own identity, so nothing about it is hardcoded here.
-SERVER_ID=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin)['serverDeviceID'])")
-SERVER_ADDRS=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['serverAddresses']))")
-
-# introducer=true: the server introduces us to other field machines, so they
-# swarm with each other instead of every download crossing the ocean.
-api POST /rest/config/devices "{
-  \"deviceID\": \"$SERVER_ID\",
-  \"name\": \"LangTechDepot Server\",
-  \"addresses\": $SERVER_ADDRS,
-  \"introducer\": true
-}" >/dev/null 2>&1 || true
 
 # Receive-only: a stray local edit gets flagged and reverted, never propagated.
 api PATCH /rest/config/defaults/folder "{\"type\": \"receiveonly\", \"path\": \"$DATA_ROOT\"}" >/dev/null
@@ -189,8 +222,6 @@ api POST /rest/config/folders "{
   \"devices\": [{\"deviceID\": \"$SERVER_ID\"}]
 }" >/dev/null 2>&1 || true
 
-echo
-echo 'Registered.'
 echo "Sync data root: $DATA_ROOT"
 echo "Automatically subscribed to: $AUTO_FOLDER_ID"
 echo 'The folder catalog will appear within a minute or two.'
