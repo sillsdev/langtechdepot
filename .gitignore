@@ -11,3 +11,4 @@ docs/_preview/
 */new*.sh
 */new*.ps1
 */.setup*.ps1
+*/.install*.sh
