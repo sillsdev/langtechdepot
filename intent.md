@@ -70,7 +70,9 @@ brings its whole contents. Taking more than you think you need is the default po
 itself with an ID and nothing else — no description of what is inside, no way to tell
 from the list whether the thing you half-remember hearing about is in there.
 
-*This Gap is no longer correct. All shares now have a brief description of the contents, such as "Apps to install on an Android device" as well as the short name, "Android_apps" in this case. JimH44*
+*This Gap is no longer correct. All shares now have a brief description of the contents, such as "Apps to install on an Android device" as well as the short name, "Android_apps" in this case.*
+
+*And now The list of all files in the repository, `LangTechDepotFiles.txt`, is preinstalled along with SyncThing as part of the installation procedure, in the share `All_Contents_List`. JimH44*
 
 ### G3 — It lands where you want it, including a thumb drive
 
