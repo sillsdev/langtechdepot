@@ -54,7 +54,6 @@ echo "Using Syncthing at $BIN"
 STATE_HOME="$HOME/.local/state"
 case "${XDG_STATE_HOME:-}" in /*) STATE_HOME="$XDG_STATE_HOME";; esac  # Syncthing ignores a relative one
 CONFIG_DIR="$STATE_HOME/langtechdepot"
-CATALOG_FILE="$DATA_ROOT/All_Contents_List/LangTechDepotFiles.txt"
 
 # No --no-default-folder: Syncthing 2.0 removed that flag along with the
 # "Default Folder" it used to suppress, so passing it is a hard error
@@ -204,12 +203,18 @@ api PATCH /rest/config/defaults/folder "{\"type\": \"receiveonly\", \"path\": \"
 # -----------------------------------------------------------------------------
 # AUTO-SUBSCRIBE: All_Contents_List
 # -----------------------------------------------------------------------------
+#
+# Variables for the repo contents list that we auto-install
+#
 AUTO_FOLDER_ID="All_Contents_List"
 AUTO_FOLDER_PATH="$DATA_ROOT/$AUTO_FOLDER_ID"
+CATALOG_FILE="$AUTO_FOLDER_PATH/LangTechDepotFiles.txt"
 
 echo "Subscribing to $AUTO_FOLDER_ID, which contains a list"
 echo "of all the files available in the Depot"
 echo "and the size of each folder you can subscribe to ..."
+echo " "
+sleep 4
 mkdir -p "$AUTO_FOLDER_PATH"
 
 api POST /rest/config/folders "{
@@ -225,14 +230,13 @@ api POST /rest/config/folders "{
 echo "Sync data root: $DATA_ROOT"
 echo "Automatically subscribed to: $AUTO_FOLDER_ID"
 echo 'The folder catalog will appear within a minute or two.'
+echo " "
+sleep 4
 
 # Now to display the folders available, with checkboxes.
 # Clicking a checkbox will subscribe to that folder, while
 # leaving one unchecked will ignore that folder.
 # (Ignored folders can be unignored later, using the SyncThing GUI.)
-
-# Path to the synced catalog file inside All_Contents_List
-CATALOG_FILE="$DATA_ROOT/All_Contents_List/LangTechDepotFiles.txt"
 
 echo "Waiting for catalog file to sync from server..."
 while [ ! -s "$CATALOG_FILE" ]; do
