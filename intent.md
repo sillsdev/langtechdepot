@@ -79,7 +79,7 @@ from the list whether the thing you half-remember hearing about is in there.
 The default is a folder on your computer, but the user should be able to point it
 somewhere else — most usefully at a removable drive they can carry or lend.
 
-*When we select folders using the SyncThing GUI, we do have the option of choosing where each folder goes, and what it is called. JimH44*
+*When we select folders using the SyncThing GUI, we do have the option of choosing where each folder goes, and what it is called. I think Gemini or Claude would be smart enough to add a browser window where we could let the user select the place to put what SyncThing delivers.JimH44*
 
 **Today.** The destination is a fixed root: `%USERPROFILE%\LangTechDepot` on Windows,
 `$HOME/LangTechDepot` on Linux.
@@ -95,14 +95,13 @@ Some users rarely see a good connection. They need to fetch exactly one file, wi
 web page, images, advertisements or "helpful" extras riding along.
 
 **Today.** `depot.langtech.cloud/files` is a bare directory browse of the repository
-tree, served by Caddy. No page weight, no scripts, nothing to download but the file you
-came for.
+tree, served by Caddy. No page weight, no scripts, nothing to download but the file you came for.
 
 **Gap.** There is no manifest. The old system had a flat list of every filename you
 could search with Ctrl-F and then walk back up to the folder. Finding a known filename
 now means opening folders until you hit it.
 
-*No longer true. A folder called All_Contents is now shared, which contains a copy of the file "LangTranDepotFiles.txt" that makes it easy to see which folder any file is in. It lists all files in the repo. JimH44*
+*No longer true. The file `LangTechDepotFiles.txt` is still at root in the file tree displayed at `depot.langtech.cloud/files`. JimH44*
 
 ### G5 — A centre mirrors once; everyone else pulls over the LAN
 
@@ -120,8 +119,7 @@ came from next door rather than from California.
 
 ### G6 — Picking what matches your kind of work is obvious
 
-Different work needs different software. The user should be able to see which folders
-are theirs without asking anyone.
+Different work needs different software. The user should be able to see which folders are theirs without asking anyone.
 
 **Today.** The catalog is organised by kind of work, and the user chooses at step 4 from
 the folders offered. `CATALOG_FOLDERS` can narrow what the server offers, globally.
@@ -130,7 +128,7 @@ the folders offered. `CATALOG_FOLDERS` can narrow what the server offers, global
 assignment and none is intended — a list that fails to explain itself has no fallback,
 because nothing else ever tells the user what a folder holds.
 
-*The last clause above is no longer true. Every folder now comes with a terse description of its contents, and a folder called All_Contents is now shared, which contains a version of LangTechDepotFiles.txt that is made from the LTSync perspective, ie. organised by kind of user. JimH44*
+*The last clause above is no longer true. Every folder now comes with a terse description of its contents, and a folder called All_Contents_List is now shared and selected by all clients by default, which contains a version of LangTechDepotFiles.txt that is made from the LTSync perspective, ie. organised by kind of user. JimH44*
 
 > G2 and G6 pull against each other on purpose: **take more than you think you need**,
 > *and* **make the choice obvious**. Both land on the same surface — the list of folders
