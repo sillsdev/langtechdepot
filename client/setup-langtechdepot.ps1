@@ -321,7 +321,6 @@ function Show-FolderSelectionForm {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "LangTechDepot - Available Folders"
     $form.Size = [System.Drawing.Size]::new(800, 520)
-    $form.MinimumSize = [System.Drawing.Size]::new(500, 300)
     $form.StartPosition = "CenterScreen"
     # Launched from a console host, this window otherwise opens behind the
     # console and never gets focus. Forcing TopMost briefly on Shown pulls it
@@ -402,7 +401,6 @@ function Show-FolderSelectionForm {
     $btnSelectAll = New-Object System.Windows.Forms.Button
     $btnSelectAll.Text = "Select All"
     $btnSelectAll.Location = [System.Drawing.Point]::new(15, 10)
-    $btnSelectAll.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
     $btnSelectAll.Add_Click({
         foreach ($row in $grid.Rows) { $row.Cells["Subscribe"].Value = $true }
     })
@@ -410,7 +408,6 @@ function Show-FolderSelectionForm {
     $btnClearAll = New-Object System.Windows.Forms.Button
     $btnClearAll.Text = "Clear All"
     $btnClearAll.Location = [System.Drawing.Point]::new(100, 10)
-    $btnClearAll.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
     $btnClearAll.Add_Click({
         foreach ($row in $grid.Rows) { $row.Cells["Subscribe"].Value = $false }
     })
@@ -419,13 +416,11 @@ function Show-FolderSelectionForm {
     $btnApply.Text = "Apply"
     $btnApply.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $btnApply.Location = [System.Drawing.Point]::new(590, 10)
-    $btnApply.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = "Cancel"
     $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $btnCancel.Location = [System.Drawing.Point]::new(680, 10)
-    $btnCancel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 
     $panel.Controls.AddRange(@($btnSelectAll, $btnClearAll, $btnApply, $btnCancel))
     $form.Controls.AddRange(@($grid, $label, $panel))
