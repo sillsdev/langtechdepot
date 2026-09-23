@@ -177,7 +177,7 @@ if ($SERVER_ID) {
         Write-Host "Giving up after 3 attempts. Syncthing is installed and running; re-run this"
         Write-Host "script once you have a working token. Ask for help at $HELP_URL"
         exit 1
-    fi
+    }
 
     $SERVER_ID    =$RESPONSE.serverDeviceID
     $SERVER_ADDRS =$RESPONSE.serverAddresses
@@ -473,4 +473,4 @@ Write-Host "open the Actions menu at the top-right, click Settings"
 Write-Host "and then Ignored Folders."
 Write-Host "Then you can click Add on any additional folders you want."
 
-exit 0
+exit 0
