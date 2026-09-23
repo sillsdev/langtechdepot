@@ -137,7 +137,7 @@ try:
     with urllib.request.urlopen(req) as resp:
         devices = json.loads(resp.read().decode('utf-8'))
         for dev in devices:
-            # Match specifically on the LangTechDepot Server name
+            # Match specifically on the LangTechDepot Server plain-text name
             if dev.get('name') == server_name:
                 print(dev.get('deviceID', ''))
                 break
@@ -148,6 +148,8 @@ except Exception:
 if [ -n "$EXISTING_SERVER_ID" ]; then
     echo "Already registered with $SERVER_NAME."
     SERVER_ID="$EXISTING_SERVER_ID"
+    sleep 3
+    echo " "
 else
     # Not yet registered with LangTechDepot -> Prompt for token
     echo "No token yet? Register at $REGISTER_URL"
@@ -155,33 +157,33 @@ else
 
     RESPONSE=''
     for attempt in 1 2 3; do
-	read -r -p 'Paste your LangTechDepot token: ' TOKEN
-	TOKEN=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
-	[ -n "$TOKEN" ] || { echo 'Nothing entered.'; continue; }
+        read -r -p 'Paste your LangTechDepot token: ' TOKEN
+        TOKEN=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
+        [ -n "$TOKEN" ] || { echo 'Nothing entered.'; continue; }
 
-	if RESPONSE=$(curl -fsS -X POST -H 'Content-Type: application/json' \
-	    -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
-	    "$REGISTER_URL/register" 2>/dev/null); then
-	    echo
-	    echo 'Registered.'
-	    break
-	fi
+        if RESPONSE=$(curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
+            "$REGISTER_URL/register" 2>/dev/null); then
+            echo
+            echo 'Registered.'
+            break
+        fi
 
-	# curl -f swallows the body on 4xx, so ask again without it for the reason.
-	REASON=$(curl -sS -X POST -H 'Content-Type: application/json' \
-	    -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
-	    "$REGISTER_URL/register" 2>/dev/null |
-	    python3 -c "import json,sys; print(json.load(sys.stdin).get('error','registration failed'))" 2>/dev/null || echo 'could not reach the registration server')
-	echo "Registration failed: $REASON"
-	RESPONSE=''
-	[ "$attempt" -lt 3 ] && echo 'Try again.'
+        # curl -f swallows the body on 4xx, so ask again without it for the reason.
+        REASON=$(curl -sS -X POST -H 'Content-Type: application/json' \
+            -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
+            "$REGISTER_URL/register" 2>/dev/null |
+            python3 -c "import json,sys; print(json.load(sys.stdin).get('error','registration failed'))" 2>/dev/null || echo 'could not reach the registration server')
+        echo "Registration failed: $REASON"
+        RESPONSE=''
+        [ "$attempt" -lt 3 ] && echo 'Try again.'
     done
 
     if [ -z "$RESPONSE" ]; then
-	echo
-	echo "Giving up after 3 attempts. Syncthing is installed and running; re-run this"
-	echo "script once you have a working token. Ask for help at $HELP_URL"
-	exit 1
+        echo
+        echo "Giving up after 3 attempts. Syncthing is installed and running; re-run this"
+        echo "script once you have a working token. Ask for help at $HELP_URL"
+        exit 1
     fi
 
     # The server tells us its own identity, so nothing about it is hardcoded here.
@@ -245,7 +247,8 @@ while [ ! -s "$CATALOG_FILE" ]; do
     sleep 2
 done
 
-# Temp file to reliably store YAD output across multi-line selections
+# Temp files for YAD interaction
+YAD_TEMP_INPUT=$(mktemp)
 SELECTIONS_FILE=$(mktemp)
 
 # Default starting state for checkboxes
@@ -255,7 +258,7 @@ while true; do
     # Filters out header/footer text, blank lines, and previously ignored folders
     # Extract folder lines using Python based on current DEFAULT_CHECK value
     # Generates EXACTLY 4 items per folder row for YAD
-    YAD_INPUT=$(python3 -c "
+    python3 -c "
 import re, sys, json, urllib.request
 
 catalog_path = sys.argv[1]
@@ -306,11 +309,11 @@ with open(catalog_path, 'r') as f:
                 print(size)          # Size column
                 print(fid)           # Folder ID column
                 print(desc)          # Description column
-" "$CATALOG_FILE" "$GUI_URL" "$API_KEY" "$SERVER_ID" "$DEFAULT_CHECK")
+" "$CATALOG_FILE" "$GUI_URL" "$API_KEY" "$SERVER_ID" "$DEFAULT_CHECK" > "$YAD_TEMP_INPUT"
 
-    if [ -z "$YAD_INPUT" ]; then
+    if [ ! -s "$YAD_TEMP_INPUT" ]; then
         echo "No new folders available to display."
-        rm -f "$SELECTIONS_FILE"
+        rm -f "$YAD_TEMP_INPUT" "$SELECTIONS_FILE"
         exit 0
     fi
 
@@ -319,7 +322,8 @@ with open(catalog_path, 'r') as f:
     # --button="Clear All":11   (Flips state to FALSE and re-renders)
     # --button="Apply":0       (Exits loop and proceeds with selections)
     # --button="Cancel":1      (Cancels operation)
-    echo "$YAD_INPUT" | yad --list \
+    set +e
+    yad --list \
         --title="LangTechDepot - Available Folders" \
         --text="Check (+) the folders you want to sync. <span foreground='white' background='red'><b> NOTE: All unchecked folders will be IGNORED (-) </b></span>" \
         --column="Subscribe (+):CHK" \
@@ -332,22 +336,25 @@ with open(catalog_path, 'r') as f:
         --button="Cancel":1 \
         --width=780 --height=450 \
         --separator="|" \
-        --print-all > "$SELECTIONS_FILE" || true
-
+        --print-all < "$YAD_TEMP_INPUT" > "$SELECTIONS_FILE"
     EXIT_CODE=$?
+    set -e
 
     if [ "$EXIT_CODE" -eq 10 ]; then
         DEFAULT_CHECK="TRUE"
     elif [ "$EXIT_CODE" -eq 11 ]; then
         DEFAULT_CHECK="FALSE"
     elif [ "$EXIT_CODE" -eq 0 ]; then
+        # User clicked Apply: break out of the loop and process $SELECTIONS_FILE
         break
     else
-        rm -f "$SELECTIONS_FILE"
+        rm -f "$YAD_TEMP_INPUT" "$SELECTIONS_FILE"
         echo "Operation cancelled."
         exit 0
     fi
 done
+
+rm -f "$YAD_TEMP_INPUT"
 
 # If output file is empty for any reason, exit cleanly
 if [ ! -s "$SELECTIONS_FILE" ]; then
@@ -356,7 +363,6 @@ if [ ! -s "$SELECTIONS_FILE" ]; then
     exit 0
 fi
 
-# Process the results via file reading to prevent shell variable truncation
 # Process choices: Checked = Subscribe, Unchecked = Ignore
 python3 -c "
 import sys, json, urllib.request, datetime
@@ -370,6 +376,18 @@ api_key = sys.argv[5]
 with open(selections_file, 'r') as f:
     lines = [line.strip() for line in f if line.strip()]
 
+# Fetch current folders already configured in Syncthing
+existing_folders = set()
+try:
+    req = urllib.request.Request(f'{gui_url}/rest/config/folders', headers={'X-API-Key': api_key})
+    with urllib.request.urlopen(req) as resp:
+        folders_cfg = json.loads(resp.read().decode('utf-8'))
+        for fld in folders_cfg:
+            if isinstance(fld, dict) and 'id' in fld:
+                existing_folders.add(fld['id'])
+except Exception as e:
+    print(f'Warning: Could not fetch active folders list: {e}')
+
 for line in lines:
     parts = line.split('|')
     if len(parts) >= 4:
@@ -379,7 +397,7 @@ for line in lines:
         desc = parts[3]
 
         # -------------------------------------------------------------
-        # 1. SUBSCRIBE (+): Replicates clicking "Add" in the Web GUI
+        # 1. SUBSCRIBE (+): Replicates clicking 'Add' in the Web GUI
         # -------------------------------------------------------------
         if sub_check == 'TRUE':
             folder_path = f'{data_root}/{fid}'
@@ -407,12 +425,23 @@ for line in lines:
 
         # -------------------------------------------------------------
         # 2. IGNORE (-): Attach ignoredFolder to the remote device object
-        # 		 Replicates clicking "Ignore" in the Web GUI
         # -------------------------------------------------------------
         else:
-            # 2. Update Syncthing ignored-folders array via /rest/config
+            # Step A: If folder was previously added, delete it from Syncthing
+            if fid in existing_folders:
+                del_req = urllib.request.Request(
+                    f'{gui_url}/rest/config/folders/{fid}',
+                    headers={'X-API-Key': api_key},
+                    method='DELETE'
+                )
+                try:
+                    urllib.request.urlopen(del_req)
+                    print(f'Removed active subscription for: {fid}')
+                except Exception as e:
+                    print(f'Warning: Could not remove active folder {fid}: {e}')
+
+            # Step B: Add folder ID to server device's ignoredFolders array
             try:
-                # 1. Fetch current device configuration
                 dev_req = urllib.request.Request(
                     f'{gui_url}/rest/config/devices/{server_id}',
                     headers={'X-API-Key': api_key}
@@ -420,10 +449,7 @@ for line in lines:
                 with urllib.request.urlopen(dev_req) as resp:
                     dev_config = json.loads(resp.read().decode('utf-8'))
 
-                # Ensure defaults and ignoredFolders structures exist
-                defaults = dev_config.get('defaults', {})
                 cur_ignores = dev_config.get('ignoredFolders', [])
-
                 already_exists = any(
                     item.get('id') == fid for item in cur_ignores if isinstance(item, dict)
                 )
@@ -438,7 +464,6 @@ for line in lines:
 
                     dev_config['ignoredFolders'] = cur_ignores
 
-                    # 2. PUT updated device config back to Syncthing
                     put_req = urllib.request.Request(
                         f'{gui_url}/rest/config/devices/{server_id}',
                         data=json.dumps(dev_config).encode('utf-8'),
@@ -466,4 +491,3 @@ echo "Then you can click Add on any additional folders you want."
 
 # echo 'or run: ./langtechdepot-subscribe.sh            (list what is on offer)'
 # echo '        ./langtechdepot-subscribe.sh <folder>   (subscribe to one)'
-
