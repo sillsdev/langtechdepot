@@ -63,7 +63,8 @@ CONFIG_DIR="$STATE_HOME/langtechdepot"
 # Syncthing API connection details (adjust GUI_URL and API_KEY if needed)
 GUI_URL="http://127.0.0.1:8384"
 API_KEY=$(xmlstarlet sel -t -v "//configuration/gui/apikey" "$HOME/.config/syncthing/config.xml" 2>/dev/null || echo "")
-SERVER_ID="LangTechDepot Server"
+SERVER_NAME="LangTechDepot Server"
+SERVER_ID=""
 
 mkdir -p "$CONFIG_DIR"
 
@@ -129,6 +130,7 @@ import sys, json, urllib.request
 
 gui_url = sys.argv[1]
 api_key = sys.argv[2]
+server_name = sys.argv[3]
 
 try:
     req = urllib.request.Request(f'{gui_url}/rest/config/devices', headers={'X-API-Key': api_key})
@@ -136,15 +138,15 @@ try:
         devices = json.loads(resp.read().decode('utf-8'))
         for dev in devices:
             # Match specifically on the LangTechDepot Server name
-            if dev.get('name') == 'LangTechDepot Server':
+            if dev.get('name') == server_name:
                 print(dev.get('deviceID', ''))
                 break
 except Exception:
     pass
-" "$GUI_URL" "$API_KEY")
+" "$GUI_URL" "$API_KEY" "$SERVER_NAME")
 
 if [ -n "$EXISTING_SERVER_ID" ]; then
-    echo "Already registered with LangTechDepot Server."
+    echo "Already registered with $SERVER_NAME."
     SERVER_ID="$EXISTING_SERVER_ID"
 else
     # Not yet registered with LangTechDepot -> Prompt for token
@@ -191,7 +193,7 @@ else
     # swarm with each other instead of every download crossing the ocean.
     api POST /rest/config/devices "{
       \"deviceID\": \"$SERVER_ID\",
-      \"name\": \"LangTechDepot Server\",
+      \"name\": \"$SERVER_NAME\",
       \"addresses\": $SERVER_ADDRS,
       \"introducer\": true
     }" >/dev/null 2>&1 || true
@@ -243,17 +245,24 @@ while [ ! -s "$CATALOG_FILE" ]; do
     sleep 2
 done
 
-# Filters out header/footer text, blank lines, and previously ignored folders
-# Extract folder lines using Python (Single Checkbox, Default: FALSE)
-# Generates EXACTLY 4 items per folder row for YAD
-#
-YAD_INPUT=$(python3 -c "
+# Temp file to reliably store YAD output across multi-line selections
+SELECTIONS_FILE=$(mktemp)
+
+# Default starting state for checkboxes
+DEFAULT_CHECK="FALSE"
+
+while true; do
+    # Filters out header/footer text, blank lines, and previously ignored folders
+    # Extract folder lines using Python based on current DEFAULT_CHECK value
+    # Generates EXACTLY 4 items per folder row for YAD
+    YAD_INPUT=$(python3 -c "
 import re, sys, json, urllib.request
 
 catalog_path = sys.argv[1]
 gui_url = sys.argv[2]
 api_key = sys.argv[3]
 server_id = sys.argv[4]
+default_check = sys.argv[5]
 
 # Fetch Syncthing's live ignored folders straight from the running instance
 ignored = set()
@@ -293,37 +302,54 @@ with open(catalog_path, 'r') as f:
             size, fid, desc = match.groups()
             # Only display folders that are NOT currently in Syncthing's live ignore list
             if fid not in ignored:
-                print('FALSE')   # Subscribe (+) Checkbox, Default unchecked (-)
-                print(size)      # Size column
-                print(fid)       # Folder ID column
-                print(desc)      # Description column
-" "$CATALOG_FILE" "$GUI_URL" "$API_KEY" "$SERVER_ID")
+                print(default_check) # Emits current default (TRUE or FALSE)
+                print(size)          # Size column
+                print(fid)           # Folder ID column
+                print(desc)          # Description column
+" "$CATALOG_FILE" "$GUI_URL" "$API_KEY" "$SERVER_ID" "$DEFAULT_CHECK")
 
-if [ -z "$YAD_INPUT" ]; then
-    echo "No new folders available to display."
-    exit 0
-fi
+    if [ -z "$YAD_INPUT" ]; then
+        echo "No new folders available to display."
+        rm -f "$SELECTIONS_FILE"
+        exit 0
+    fi
 
-# Temp file to reliably store YAD output across multi-line selections
-SELECTIONS_FILE=$(mktemp)
+    # Display YAD table with custom action buttons
+    # --button="Select All":10  (Flips state to TRUE and re-renders)
+    # --button="Clear All":11   (Flips state to FALSE and re-renders)
+    # --button="Apply":0       (Exits loop and proceeds with selections)
+    # --button="Cancel":1      (Cancels operation)
+    echo "$YAD_INPUT" | yad --list \
+        --title="LangTechDepot - Available Folders" \
+        --text="Check (+) the folders you want to sync. <span foreground='white' background='red'><b> NOTE: All unchecked folders will be IGNORED (-) </b></span>" \
+        --column="Subscribe (+):CHK" \
+        --column="Size" \
+        --column="Folder ID" \
+        --column="Description" \
+        --button="Select All":10 \
+        --button="Clear All":11 \
+        --button="Apply":0 \
+        --button="Cancel":1 \
+        --width=780 --height=450 \
+        --separator="|" \
+        --print-all > "$SELECTIONS_FILE" || true
 
-# Display YAD table with a single Subscribe (+) checkbox
-# and with high-visibility warning banner
-# Render YAD with --print-all to capture EVERY row state cleanly
-echo "$YAD_INPUT" | yad --list \
-    --title="LangTechDepot - Available Folders" \
-    --text="Check (+) the folders you want to sync. <span foreground='white' background='red'><b> NOTE: All unchecked folders will be IGNORED (-) </b></span>" \
-    --column="Subscribe (+):CHK" \
-    --column="Size" \
-    --column="Folder ID" \
-    --column="Description" \
-    --button="Apply:0" \
-    --button="Cancel:1" \
-    --width=780 --height=450 \
-    --separator="|" \
-    --print-all > "$SELECTIONS_FILE" || true
+    EXIT_CODE=$?
 
-# If user cancels or closes window without selections, exit cleanly
+    if [ "$EXIT_CODE" -eq 10 ]; then
+        DEFAULT_CHECK="TRUE"
+    elif [ "$EXIT_CODE" -eq 11 ]; then
+        DEFAULT_CHECK="FALSE"
+    elif [ "$EXIT_CODE" -eq 0 ]; then
+        break
+    else
+        rm -f "$SELECTIONS_FILE"
+        echo "Operation cancelled."
+        exit 0
+    fi
+done
+
+# If output file is empty for any reason, exit cleanly
 if [ ! -s "$SELECTIONS_FILE" ]; then
     rm -f "$SELECTIONS_FILE"
     echo "Operation cancelled."
@@ -440,3 +466,4 @@ echo "Then you can click Add on any additional folders you want."
 
 # echo 'or run: ./langtechdepot-subscribe.sh            (list what is on offer)'
 # echo '        ./langtechdepot-subscribe.sh <folder>   (subscribe to one)'
+
