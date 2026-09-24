@@ -295,7 +295,7 @@ function Show-FolderSelectionForm {
         if ($line -like "*Individual files available*") { break }
         if (-not $inFolders -or -not $line) { continue }
 
-        if ($line -match '^\s*(\S+)\s+(\S+)\s+"(.*)"\s*$') {
+        if ($line -match '^\s*(\S+)\s+(\S+?)\s*"(.*)"\s*$') {
             $size = $matches[1]
             $fid  = $matches[2]
             $desc = $matches[3]
