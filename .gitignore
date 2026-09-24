@@ -12,3 +12,4 @@ docs/_preview/
 */new*.ps1
 */.setup*.ps1
 */.install*.sh
+*/.Install*.bat
