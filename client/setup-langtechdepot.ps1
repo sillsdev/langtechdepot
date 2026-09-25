@@ -29,12 +29,10 @@ function Exit-Script {
 $REGISTER_URL = "https://depot.langtech.cloud"
 $HELP_URL     = "https://sillsdev.github.io/langtechdepot/help.html"
 
-$DATA_ROOT  = "$HOME\LangTechDepot"
 $BIN_DIR    = "$env:LOCALAPPDATA\Programs\Syncthing"
 $BIN        = "$BIN_DIR\syncthing.exe"
 $CONFIG_DIR = "$env:LOCALAPPDATA\langtechdepot"
 
-New-Item -ItemType Directory -Force -Path $DATA_ROOT | Out-Null
 New-Item -ItemType Directory -Force -Path $BIN_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $CONFIG_DIR | Out-Null
 
@@ -58,12 +56,33 @@ if (-not (Test-Path $BIN)) {
 }
 Write-Host "Using Syncthing at $BIN"
 
-# Generate config.xml if it does not exist. --gui-address pins the GUI to the
-# standard port (8384) instead of letting Syncthing pick a random one, which
-# is what config.xml would otherwise get on a fresh install.
+# Helper functions for reading/writing values in config.xml
+function Get-XmlNodeText {
+    param([string]$path, [string]$xpath)
+    [xml]$xml = Get-Content -Path $path
+    return $xml.SelectSingleNode($xpath).InnerText
+}
+
+function Set-XmlNodeText {
+    param([string]$path, [string]$xpath, [string]$value)
+    [xml]$xml = Get-Content -Path $path
+    $node = $xml.SelectSingleNode($xpath)
+    if ($node) {
+        $node.InnerText = $value
+        $xml.Save($path)
+    }
+}
+
+# Generate config.xml if it does not exist. "generate" has no flag to set the
+# GUI address directly (that only exists on "serve" and "cli"), so the
+# address is patched into the freshly written config.xml afterward instead -
+# pinning it to the standard port (8384) rather than leaving whatever
+# Syncthing chose on its own, which on a fresh install can be a random port.
 $configFile = "$CONFIG_DIR\config.xml"
-if (-not (Test-Path $configFile)) {
-    Start-Process -FilePath $BIN -ArgumentList "generate", "--home", $CONFIG_DIR, "--gui-address", "127.0.0.1:8384" -NoNewWindow -Wait
+$isFreshInstall = -not (Test-Path $configFile)
+if ($isFreshInstall) {
+    Start-Process -FilePath $BIN -ArgumentList "generate", "--home", $CONFIG_DIR -NoNewWindow -Wait
+    Set-XmlNodeText -path $configFile -xpath "//configuration/gui/address" -value "127.0.0.1:8384"
 }
 
 # Run Syncthing in the background at logon, via a Startup-folder shortcut.
@@ -96,12 +115,6 @@ if (-not (Get-Process -Name "syncthing" -ErrorAction SilentlyContinue)) {
 }
 
 # Helper functions for REST API
-function Get-XmlNodeText {
-    param([string]$path, [string]$xpath)
-    [xml]$xml = Get-Content -Path $path
-    return $xml.SelectSingleNode($xpath).InnerText
-}
-
 $API_KEY = Get-XmlNodeText -path $configFile -xpath "//configuration/gui/apikey"
 $GUI_ADDR = "127.0.0.1:8384"
 $GUI_URL = "http://$GUI_ADDR"
@@ -222,7 +235,69 @@ if ($SERVER_ID) {
     } | Out-Null
 }
 
-# Default Receive-only setup
+# -----------------------------------------------------------------------------
+# Where LangTechDepot's synced files live
+# -----------------------------------------------------------------------------
+# Chosen once via a folder picker (so it can go on a different drive, an
+# external disk, etc.) and then remembered by saving it into Syncthing's own
+# "default folder" setting - the same setting the Syncthing web GUI itself
+# uses to pre-fill the path when she clicks "Add Folder". That makes it a
+# single shared source of truth: on later runs we just read back whatever is
+# there, which also means if she changes it herself in the GUI, this script
+# picks up that change too, rather than silently overriding it.
+#
+# Syncthing keeps each folder's own path fixed once that folder is created,
+# so this only prompts on a fresh install - picking somewhere different on a
+# later run would only affect brand-new folders and leave existing ones
+# right where they already are.
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+if ($isFreshInstall) {
+    $defaultRoot = "$HOME\LangTechDepot"
+
+    $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $folderDialog.Description = "Choose where to store your LangTechDepot files. Use 'Make New Folder' to create a new one."
+    $folderDialog.ShowNewFolderButton = $true
+    if (Test-Path $defaultRoot) {
+        $folderDialog.SelectedPath = $defaultRoot
+    } else {
+        $folderDialog.SelectedPath = $HOME
+    }
+
+    # FolderBrowserDialog has no TopMost property of its own (it's a Win32
+    # wrapper, not a Form) and no owner window, so - same problem as the
+    # folder-selection dialog further down this script - it can open behind
+    # the console and never get focus. A tiny invisible TopMost form as its
+    # owner is the standard workaround.
+    $ownerForm = New-Object System.Windows.Forms.Form
+    $ownerForm.FormBorderStyle = "None"
+    $ownerForm.ShowInTaskbar = $false
+    $ownerForm.StartPosition = "Manual"
+    $ownerForm.Location = New-Object System.Drawing.Point(-2000, -2000)
+    $ownerForm.Size = New-Object System.Drawing.Size(1, 1)
+    $ownerForm.Opacity = 0
+    $ownerForm.TopMost = $true
+    $ownerForm.Show()
+
+    $result = $folderDialog.ShowDialog($ownerForm)
+    $ownerForm.Close()
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $folderDialog.SelectedPath) {
+        $DATA_ROOT = $folderDialog.SelectedPath
+    } else {
+        $DATA_ROOT = $defaultRoot
+        Write-Host "No folder chosen - using the default location: $DATA_ROOT"
+    }
+} else {
+    $DATA_ROOT = (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/defaults/folder").path
+    if (-not $DATA_ROOT) { $DATA_ROOT = "$HOME\LangTechDepot" }
+}
+
+New-Item -ItemType Directory -Force -Path $DATA_ROOT | Out-Null
+
+# Default Receive-only setup - also what the Syncthing GUI's own "Add
+# Folder" button offers as a starting path, per the comment block above.
 Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/defaults/folder" -Body @{
     type = "receiveonly"
     path = $DATA_ROOT
@@ -259,15 +334,25 @@ Write-Host " "
 Start-Sleep -Seconds 4
 
 Write-Host "Waiting for catalog file to sync from server..."
+$catalogTimeoutSeconds = 180
+$catalogWaited = 0
 while (-not (Test-Path $CATALOG_FILE) -or (Get-Item $CATALOG_FILE).Length -eq 0) {
     Start-Sleep -Seconds 2
+    $catalogWaited += 2
+    if ($catalogWaited -ge $catalogTimeoutSeconds) {
+        Write-Host ""
+        Write-Warning "Still waiting for the folder catalog after $catalogTimeoutSeconds seconds."
+        Write-Host "Syncthing is running, but hasn't finished syncing $AUTO_FOLDER_ID from the server yet."
+        Write-Host "Open $GUI_URL and check the Folders list and any red or yellow notices there."
+        Write-Host "Syncthing will keep running in the background - once $AUTO_FOLDER_ID shows"
+        Write-Host "'Up to Date' there, just run this installer again to pick your folders."
+        Exit-Script -Code 1
+    }
 }
 
 # -----------------------------------------------------------------------------
 # GUI Folder Selection Window (.NET Windows Forms DataGridView)
 # -----------------------------------------------------------------------------
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
 
 function Show-FolderSelectionForm {
     param(
