@@ -119,6 +119,43 @@ function Set-XmlNodeText {
     }
 }
 
+# ============================================================================
+# WORKAROUND FOR UPSTREAM SYNCTHING BUG - START (function definition)
+# ----------------------------------------------------------------------------
+# Syncthing itself (not this script) corrupts empty-string fields whenever it
+# rewrites config.xml: instead of writing e.g. <encryptionPassword></encryptionPassword>
+# it writes <encryptionPassword>&#xA;        </encryptionPassword> - a literal
+# escaped-newline entity plus trailing indentation spaces, sitting inside a
+# tag that is supposed to be empty. We confirmed this happens even on fields
+# this script never sends (urUniqueID, auditFile, internal
+# <defaults><folder><device> entries that Syncthing builds on its own), so
+# it's a bug in Syncthing's own config serializer, not something caused by
+# this script's REST API payloads. Explicitly sending "" for a field in our
+# POST/PATCH bodies does NOT prevent this - Syncthing corrupts it again the
+# next time it rewrites the file regardless of what we sent. Reported
+# upstream: [add issue URL here once filed].
+#
+# This function repairs the raw XML text after the fact, turning that
+# corrupted pattern back into a clean empty element. It must only be run
+# while Syncthing is NOT running, since it edits config.xml directly on
+# disk and Syncthing would either lock the file or overwrite/re-corrupt our
+# fix the next time it saves its own config.
+#
+# TO REMOVE THIS WORKAROUND once Syncthing ships a fix: delete this whole
+# function, and delete both places later in this script that call it
+# (search for "WORKAROUND FOR UPSTREAM SYNCTHING BUG"). The pre-workaround
+# version of this script is checked into the repo for reference/rollback.
+function Repair-CorruptedEmptyXmlFields {
+    param([string]$path)
+    $raw = Get-Content -Path $path -Raw
+    $fixed = $raw -replace '<(\w+)([^>]*)>&#xA;\s*</\1>', '<$1$2></$1>'
+    if ($fixed -ne $raw) {
+        Set-Content -Path $path -Value $fixed -NoNewline
+    }
+}
+# WORKAROUND FOR UPSTREAM SYNCTHING BUG - END (function definition)
+# ============================================================================
+
 # Generate config.xml if it does not exist. "generate" has no flag to set the
 # GUI address directly (that only exists on "serve" and "cli"), so the
 # address is patched into the freshly written config.xml afterward instead -
@@ -129,6 +166,13 @@ $isFreshInstall = -not (Test-Path $configFile)
 if ($isFreshInstall) {
     Start-Process -FilePath $BIN -ArgumentList "generate", "--home", $CONFIG_DIR -NoNewWindow -Wait
     Set-XmlNodeText -path $configFile -xpath "//configuration/gui/address" -value "127.0.0.1:8384"
+
+    # WORKAROUND FOR UPSTREAM SYNCTHING BUG (call site 1 of 2) - see the
+    # Repair-CorruptedEmptyXmlFields function above for the full explanation.
+    # "generate" itself already writes corrupted empty fields (e.g.
+    # urUniqueID, auditFile) into the brand-new config.xml, so we clean it up
+    # here too, before Syncthing is even running for the first time.
+    Repair-CorruptedEmptyXmlFields -path $configFile
 }
 
 # Run Syncthing in the background at logon, via a Startup-folder shortcut.
@@ -273,6 +317,14 @@ if ($SERVER_ID) {
     $SERVER_ID    = $RESPONSE.serverDeviceID
     $SERVER_ADDRS = $RESPONSE.serverAddresses
 
+    # NOTE: encryptionPassword is not a valid field on this top-level device
+    # registry object (it only exists on a per-folder device-share entry -
+    # see the /rest/config/folders calls further down), so Syncthing's REST
+    # API silently drops it if we send it here; sending it was tried and
+    # confirmed to have no effect. The actual corrupted-empty-field bug is
+    # fixed for this entry, and everywhere else, by the end-of-script repair
+    # pass - see Repair-CorruptedEmptyXmlFields and its second call site
+    # near the end of this script.
     Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/devices" -Body @{
         deviceID   = $SERVER_ID
         name       = $SERVER_NAME
@@ -363,6 +415,14 @@ Write-Host " "
 Start-Sleep -Seconds 4
 New-Item -ItemType Directory -Force -Path $AUTO_FOLDER_PATH | Out-Null
 
+# encryptionPassword IS a valid field on this per-folder device-share entry
+# (unlike the top-level device registry entry above, where it's silently
+# ignored). It's kept explicit here since it's schema-valid and harmless,
+# but on its own it does NOT stop Syncthing corrupting this field when it
+# next rewrites config.xml - that's handled instead by the end-of-script
+# repair pass (see Repair-CorruptedEmptyXmlFields, called near the end of
+# this script). This explicit "" can be left as-is or removed once the
+# upstream bug is fixed; it's harmless either way.
 Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
     id              = $AUTO_FOLDER_ID
     label           = "All_Contents_List -- a list of all files available"
@@ -370,7 +430,7 @@ Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
     type            = "receiveonly"
     rescanIntervalS = 3600
     fsWatcherEnabled = $true
-    devices         = @(@{ deviceID = $SERVER_ID })
+    devices         = @(@{ deviceID = $SERVER_ID; encryptionPassword = "" })
 } | Out-Null
 
 Write-Host "Sync data root: $DATA_ROOT"
@@ -619,6 +679,10 @@ foreach ($item in $selections) {
     if ($isSub) {
         $folderPath = Join-Path $DATA_ROOT $fid
         try {
+            # See the matching comment on the All_Contents_List folder call
+            # above: encryptionPassword is schema-valid and harmless here,
+            # but the actual fix for the corrupted-empty-field bug is the
+            # end-of-script repair pass, not this explicit "".
             Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
                 id              = $fid
                 label           = $desc
@@ -626,7 +690,7 @@ foreach ($item in $selections) {
                 type            = "receiveonly"
                 rescanIntervalS = 3600
                 fsWatcherEnabled = $true
-                devices         = @(@{ deviceID = $SERVER_ID })
+                devices         = @(@{ deviceID = $SERVER_ID; encryptionPassword = "" })
             } | Out-Null
             Write-Host "Successfully subscribed to: $fid"
         } catch {
@@ -678,6 +742,39 @@ foreach ($item in $selections) {
         }
     }
 }
+
+# ============================================================================
+# WORKAROUND FOR UPSTREAM SYNCTHING BUG (call site 2 of 2) - START
+# ----------------------------------------------------------------------------
+# See Repair-CorruptedEmptyXmlFields near the top of this script for the
+# full explanation. All the device/folder registration above has now run,
+# each one an occasion for Syncthing to have corrupted some empty field in
+# config.xml again, so we do one last repair pass here. Syncthing has to be
+# stopped first - it holds config.xml open and would either block our edit
+# or overwrite it the next time it autosaves - and then restarted the same
+# way it was started earlier in this script.
+#
+# TO REMOVE THIS WORKAROUND once Syncthing ships a fix: delete this whole
+# block (both the Stop-Process and the restart), leaving just the Write-Host
+# messages above and "Exit-Script -Code 0" below.
+Write-Host " "
+Write-Host "Applying a temporary workaround for a known Syncthing config bug..."
+$syncthingProc = Get-Process -Name "syncthing" -ErrorAction SilentlyContinue
+if ($syncthingProc) {
+    $syncthingProc | Stop-Process -Force
+    # Give Windows a moment to fully release the file handle on config.xml
+    # before we try to edit it.
+    Start-Sleep -Seconds 2
+}
+
+Repair-CorruptedEmptyXmlFields -path $configFile
+
+# Restart the same way it's started earlier in this script (see the
+# "Make sure it's running right now too" block above).
+Start-Process -FilePath $BIN -ArgumentList "serve", "--no-browser", "--home", $CONFIG_DIR -WindowStyle Hidden
+Start-Sleep -Seconds 2
+# WORKAROUND FOR UPSTREAM SYNCTHING BUG - END
+# ============================================================================
 
 Write-Host " "
 Write-Host "If you later need to manage the SyncThing system directly,"
