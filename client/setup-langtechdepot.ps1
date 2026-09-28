@@ -4,7 +4,7 @@
 # Installs Syncthing, registers this machine with the LangTechDepot server,
 #   using the token you were issued.
 # Auto-subscribes to All_Contents_List, and lets you choose folders to install or ignore,
-#   using checkboxes.
+#   using checkboxes. Run it again later to add folders or take back ignored ones.
 # Idempotent.
 
 param(
@@ -463,10 +463,14 @@ function Show-FolderSelectionForm {
     param(
         [string]$CatalogPath,
         [string]$ServerID,
-        [bool]$DefaultCheck
+        # Always listed, ticked by default, and left alone by "Clear All" -
+        # the installer needs this folder's catalog file to build this list.
+        [string]$AlwaysShowID
     )
 
-    # Fetch live ignored list
+    # What this device already has, so the list opens showing it as it is.
+    # Starting every row unticked would make "Apply" unsubscribe the user from
+    # everything they chose on an earlier run.
     $ignored = [System.Collections.Generic.HashSet[string]]::new()
     try {
         $devCfg = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices/$ServerID"
@@ -475,9 +479,19 @@ function Show-FolderSelectionForm {
         }
     } catch {}
 
-    # Parse catalog file
-    $tableData = [System.Collections.ArrayList]::new()
+    $subscribed = [System.Collections.Generic.HashSet[string]]::new()
+    try {
+        foreach ($fld in (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/folders")) {
+            if ($fld.id) { $subscribed.Add($fld.id) | Out-Null }
+        }
+    } catch {}
+
+    # Parse catalog file. Every folder is read; ignored ones are held back
+    # until the user asks to see them.
+    $shownRows  = [System.Collections.ArrayList]::new()
+    $hiddenRows = [System.Collections.ArrayList]::new()
     $inFolders = $false
+    $sawAlwaysShow = $false
 
     foreach ($line in (Get-Content $CatalogPath)) {
         $line = $line.Trim()
@@ -486,24 +500,41 @@ function Show-FolderSelectionForm {
         if (-not $inFolders -or -not $line) { continue }
 
         if ($line -match '^\s*(\S+)\s+(\S+?)\s*"(.*)"\s*$') {
-            $size = $matches[1]
-            $fid  = $matches[2]
-            $desc = $matches[3]
+            $fid = $matches[2]
+            $isAlways = ($fid -eq $AlwaysShowID)
+            if ($isAlways) { $sawAlwaysShow = $true }
 
-            if (-not $ignored.Contains($fid)) {
-                $row = New-Object PSObject -Property @{
-                    Subscribe   = $DefaultCheck
-                    Size        = $size
-                    FolderID    = $fid
-                    Description = $desc
-                }
-                $tableData.Add($row) | Out-Null
+            if ($isAlways -or $subscribed.Contains($fid)) { $status = "subscribed" }
+            elseif ($ignored.Contains($fid))              { $status = "ignored" }
+            else                                          { $status = "new" }
+
+            $row = [PSCustomObject]@{
+                Subscribe   = ($isAlways -or $subscribed.Contains($fid))
+                Status      = $status
+                Size        = $matches[1]
+                FolderID    = $fid
+                Description = $matches[3]
             }
+            # The catalog folder is never hidden, even if it was ignored on an
+            # earlier run: the installer subscribes to it again every time.
+            if ($status -eq "ignored" -and -not $isAlways) { $hiddenRows.Add($row) | Out-Null }
+            else                                           { $shownRows.Add($row) | Out-Null }
         }
     }
 
-    if ($tableData.Count -eq 0) {
-        Write-Host "No new folders available to display."
+    # If the catalog does not list the catalog folder itself, still show it.
+    if ($AlwaysShowID -and -not $sawAlwaysShow) {
+        $shownRows.Insert(0, [PSCustomObject]@{
+            Subscribe   = $true
+            Status      = "subscribed"
+            Size        = ""
+            FolderID    = $AlwaysShowID
+            Description = "A list of all files available"
+        })
+    }
+
+    if ($shownRows.Count -eq 0 -and $hiddenRows.Count -eq 0) {
+        Write-Host "No folders are listed in the catalog yet."
         return $null
     }
 
@@ -511,7 +542,9 @@ function Show-FolderSelectionForm {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "LangTechDepot - Available Folders"
     $form.Size = [System.Drawing.Size]::new(800, 520)
-    $form.MinimumSize = [System.Drawing.Size]::new(500, 300)
+    # Wide enough that the left-hand buttons never slide under Apply/Cancel,
+    # which are anchored to the right edge.
+    $form.MinimumSize = [System.Drawing.Size]::new(660, 300)
     $form.StartPosition = "CenterScreen"
     # Launched from a console host, this window otherwise opens behind the
     # console and never gets focus. Forcing TopMost briefly on Shown pulls it
@@ -558,6 +591,13 @@ function Show-FolderSelectionForm {
     $colChk.AutoSizeMode = "AllCells"
     $grid.Columns.Add($colChk) | Out-Null
 
+    $colStatus = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $colStatus.HeaderText = "Now"
+    $colStatus.Name = "Status"
+    $colStatus.ReadOnly = $true
+    $colStatus.AutoSizeMode = "AllCells"
+    $grid.Columns.Add($colStatus) | Out-Null
+
     $colSize = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colSize.HeaderText = "Size"
     $colSize.Name = "Size"
@@ -579,10 +619,16 @@ function Show-FolderSelectionForm {
     $colDesc.AutoSizeMode = "Fill"
     $grid.Columns.Add($colDesc) | Out-Null
 
-    # Populate rows
-    foreach ($item in $tableData) {
-        $grid.Rows.Add($item.Subscribe, $item.Size, $item.FolderID, $item.Description) | Out-Null
+    # Populate rows. Ignored folders, when shown, are greyed so they stand
+    # out from the rest; ticking one un-ignores it on Apply.
+    $addRow = {
+        param($item)
+        $idx = $grid.Rows.Add($item.Subscribe, $item.Status, $item.Size, $item.FolderID, $item.Description)
+        if ($item.Status -eq "ignored") {
+            $grid.Rows[$idx].DefaultCellStyle.ForeColor = [System.Drawing.Color]::Gray
+        }
     }
+    foreach ($item in $shownRows) { & $addRow $item }
 
     # Bottom Button Panel
     $panel = New-Object System.Windows.Forms.Panel
@@ -608,8 +654,29 @@ function Show-FolderSelectionForm {
     $btnClearAll.Text = "Clear All"
     $btnClearAll.Location = [System.Drawing.Point]::new(100, 10)
     $btnClearAll.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
+    # Leaves the catalog folder ticked, so clearing the list to start over
+    # does not also drop the list of what is available. It can still be
+    # unticked by hand.
     $btnClearAll.Add_Click({
-        foreach ($row in $grid.Rows) { $row.Cells["Subscribe"].Value = $false }
+        foreach ($row in $grid.Rows) {
+            if ($row.Cells["FolderID"].Value -ne $AlwaysShowID) { $row.Cells["Subscribe"].Value = $false }
+        }
+    })
+
+    # Adds the ignored folders to the list in place, rather than reopening the
+    # window, so ticks the user has already made are kept. One use only.
+    $btnShowIgnored = New-Object System.Windows.Forms.Button
+    $btnShowIgnored.Text = "Also display ignored folders"
+    $btnShowIgnored.AutoSize = $true
+    $btnShowIgnored.Location = [System.Drawing.Point]::new(185, 10)
+    $btnShowIgnored.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
+    if ($hiddenRows.Count -eq 0) {
+        $btnShowIgnored.Text = "No ignored folders"
+        $btnShowIgnored.Enabled = $false
+    }
+    $btnShowIgnored.Add_Click({
+        foreach ($item in $hiddenRows) { & $addRow $item }
+        $btnShowIgnored.Enabled = $false
     })
 
     $btnApply = New-Object System.Windows.Forms.Button
@@ -624,7 +691,7 @@ function Show-FolderSelectionForm {
     $btnCancel.Location = [System.Drawing.Point]::new(680, 10)
     $btnCancel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 
-    $panel.Controls.AddRange(@($btnSelectAll, $btnClearAll, $btnApply, $btnCancel))
+    $panel.Controls.AddRange(@($btnSelectAll, $btnClearAll, $btnShowIgnored, $btnApply, $btnCancel))
     $form.Controls.AddRange(@($grid, $label, $panel))
     $form.AcceptButton = $btnApply
     $form.CancelButton = $btnCancel
@@ -635,7 +702,8 @@ function Show-FolderSelectionForm {
         return $null
     }
 
-    # Extract chosen selections
+    # Extract chosen selections. Ignored folders that were never displayed
+    # are not returned, so they are left exactly as they are.
     $results = [System.Collections.ArrayList]::new()
     foreach ($row in $grid.Rows) {
         $results.Add(@{
@@ -649,7 +717,7 @@ function Show-FolderSelectionForm {
     return $results
 }
 
-$selections = Show-FolderSelectionForm -CatalogPath $CATALOG_FILE -ServerID $SERVER_ID -DefaultCheck $false
+$selections = Show-FolderSelectionForm -CatalogPath $CATALOG_FILE -ServerID $SERVER_ID -AlwaysShowID $AUTO_FOLDER_ID
 
 if (-not $selections) {
     Write-Host "Operation cancelled."
@@ -669,6 +737,44 @@ try {
     Write-Host "Warning: Could not fetch active folders list."
 }
 
+# Adds or removes one folder ID in the server device's ignoredFolders list.
+# We still GET first because we need the current list to change - but we
+# PATCH just the ignoredFolders field back, rather than PUTting the whole
+# device object. A PUT here would round-trip every other field on the device
+# (addresses, introducer, paused, etc.) through us, and if Syncthing changed
+# any of those between our GET and our PUT (e.g. the user editing something
+# in the GUI at the same time, or Syncthing updating its own connection state)
+# we'd silently clobber that change. PATCH only touches the field we name.
+# Syncthing's PATCH replaces the whole array, so the full new list is sent.
+function Set-FolderIgnored {
+    param([string]$FolderID, [string]$Label, [bool]$Ignore)
+
+    $devConfig = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices/$SERVER_ID"
+    $curIgnores = @($devConfig.ignoredFolders | Where-Object { $_ })
+    $isIgnored = [bool]($curIgnores | Where-Object { $_.id -eq $FolderID })
+
+    if ($Ignore) {
+        if ($isIgnored) { Write-Host "Folder already marked as ignored: $FolderID"; return }
+        $newIgnore = @{
+            id    = $FolderID
+            label = $Label
+            time  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        }
+        # Array concatenation returns a new array - simpler and safer here
+        # than trying to grow $curIgnores in place.
+        $updated = @($curIgnores) + $newIgnore
+        Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$SERVER_ID" -Body @{ ignoredFolders = $updated } | Out-Null
+        Write-Host "Successfully ignored folder via API: $FolderID"
+    } else {
+        if (-not $isIgnored) { return }
+        # @(...) keeps an empty result an empty array, so the last ignore can
+        # be removed and Syncthing receives [] rather than null.
+        $updated = @($curIgnores | Where-Object { $_.id -ne $FolderID })
+        Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$SERVER_ID" -Body @{ ignoredFolders = $updated } | Out-Null
+        Write-Host "No longer ignoring: $FolderID"
+    }
+}
+
 foreach ($item in $selections) {
     $fid   = $item.FolderID
     $desc  = $item.Description
@@ -676,24 +782,37 @@ foreach ($item in $selections) {
 
     # 1. SUBSCRIBE (+)
     if ($isSub) {
-        $folderPath = Join-Path $DATA_ROOT $fid
+        if ($existingFolders.Contains($fid)) {
+            # Already subscribed: leave its settings alone rather than
+            # re-creating it.
+            Write-Host "Already subscribed to: $fid"
+        } else {
+            $folderPath = Join-Path $DATA_ROOT $fid
+            try {
+                # See the matching comment on the All_Contents_List folder call
+                # above: encryptionPassword is schema-valid and harmless here,
+                # but the actual fix for the corrupted-empty-field bug is the
+                # end-of-script repair pass, not this explicit "".
+                Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
+                    id              = $fid
+                    label           = $desc
+                    path            = $folderPath
+                    type            = "receiveonly"
+                    rescanIntervalS = 3600
+                    fsWatcherEnabled = $true
+                    devices         = @(@{ deviceID = $SERVER_ID; encryptionPassword = "" })
+                } | Out-Null
+                Write-Host "Successfully subscribed to: $fid"
+            } catch {
+                Write-Host "Failed to subscribe to $fid"
+            }
+        }
+        # A folder ticked after "Also display ignored folders" comes off the
+        # ignore list too, so the configuration does not contradict itself.
         try {
-            # See the matching comment on the All_Contents_List folder call
-            # above: encryptionPassword is schema-valid and harmless here,
-            # but the actual fix for the corrupted-empty-field bug is the
-            # end-of-script repair pass, not this explicit "".
-            Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
-                id              = $fid
-                label           = $desc
-                path            = $folderPath
-                type            = "receiveonly"
-                rescanIntervalS = 3600
-                fsWatcherEnabled = $true
-                devices         = @(@{ deviceID = $SERVER_ID; encryptionPassword = "" })
-            } | Out-Null
-            Write-Host "Successfully subscribed to: $fid"
+            Set-FolderIgnored -FolderID $fid -Label $desc -Ignore $false
         } catch {
-            Write-Host "Failed to subscribe to $fid"
+            Write-Host "Warning: Could not un-ignore $fid via API: $_"
         }
     }
     # 2. IGNORE (-)
@@ -708,43 +827,9 @@ foreach ($item in $selections) {
             }
         }
 
-        # Step B: Append folder ID to server's ignoredFolders array
+        # Step B: Add folder ID to server's ignoredFolders array
         try {
-            # We still GET first because we need to know the current list to
-            # append to and to check for a duplicate - but we PATCH just the
-            # ignoredFolders field back, rather than PUTting the whole device
-            # object. A PUT here would round-trip every other field on the
-            # device (addresses, introducer, paused, etc.) through us, and if
-            # Syncthing changed any of those between our GET and our PUT
-            # (e.g. the user editing something in the GUI at the same time,
-            # or Syncthing updating its own connection state) we'd silently
-            # clobber that change. PATCH only touches the field we name.
-            $devConfig = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices/$SERVER_ID"
-            $curIgnores = $devConfig.ignoredFolders
-            if (-not $curIgnores) { $curIgnores = @() }
-
-            $alreadyExists = $false
-            foreach ($ig in $curIgnores) {
-                if ($ig.id -eq $fid) { $alreadyExists = $true; break }
-            }
-
-            if (-not $alreadyExists) {
-                $nowStr = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-                $newIgnore = @{
-                    id    = $fid
-                    label = $desc
-                    time  = $nowStr
-                }
-
-                # Append via array concatenation, which returns a new array -
-                # simpler and safer here than trying to grow $curIgnores in place.
-                $updatedIgnores = @($curIgnores) + $newIgnore
-
-                Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$SERVER_ID" -Body @{ ignoredFolders = $updatedIgnores } | Out-Null
-                Write-Host "Successfully ignored folder via API: $fid"
-            } else {
-                Write-Host "Folder already marked as ignored: $fid"
-            }
+            Set-FolderIgnored -FolderID $fid -Label $desc -Ignore $true
         } catch {
             Write-Host "Warning: Could not ignore $fid via API: $_"
         }
@@ -785,11 +870,10 @@ Start-Sleep -Seconds 2
 # ============================================================================
 
 Write-Host " "
-Write-Host "If you later need to manage the SyncThing system directly,"
-Write-Host "open $GUI_URL."
-Write-Host "Then if you want to unignore a folder,"
-Write-Host "open the Actions menu at the top-right, click Settings"
-Write-Host "and then Ignored Folders."
-Write-Host "Then you can click Add on any additional folders you want."
+Write-Host "To add more folders later, or take back one you ignored,"
+Write-Host "just run this installer again. In the folder list, click"
+Write-Host "'Also display ignored folders' to see the ones you ignored."
+Write-Host " "
+Write-Host "If you ever need to manage Syncthing directly, open $GUI_URL."
 
-Exit-Script -Code 0
+Exit-Script -Code 0
