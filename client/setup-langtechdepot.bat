@@ -711,6 +711,15 @@ foreach ($item in $selections) {
 
         # Step B: Append folder ID to server's ignoredFolders array
         try {
+            # We still GET first because we need to know the current list to
+            # append to and to check for a duplicate - but we PATCH just the
+            # ignoredFolders field back, rather than PUTting the whole device
+            # object. A PUT here would round-trip every other field on the
+            # device (addresses, introducer, paused, etc.) through us, and if
+            # Syncthing changed any of those between our GET and our PUT
+            # (e.g. the user editing something in the GUI at the same time,
+            # or Syncthing updating its own connection state) we'd silently
+            # clobber that change. PATCH only touches the field we name.
             $devConfig = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices/$SERVER_ID"
             $curIgnores = $devConfig.ignoredFolders
             if (-not $curIgnores) { $curIgnores = @() }
@@ -730,9 +739,9 @@ foreach ($item in $selections) {
 
                 # Append via array concatenation, which returns a new array -
                 # simpler and safer here than trying to grow $curIgnores in place.
-                $devConfig.ignoredFolders = @($curIgnores) + $newIgnore
+                $updatedIgnores = @($curIgnores) + $newIgnore
 
-                Invoke-SyncthingApi -Method "PUT" -Endpoint "/rest/config/devices/$SERVER_ID" -Body $devConfig | Out-Null
+                Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$SERVER_ID" -Body @{ ignoredFolders = $updatedIgnores } | Out-Null
                 Write-Host "Successfully ignored folder via API: $fid"
             } else {
                 Write-Host "Folder already marked as ignored: $fid"
