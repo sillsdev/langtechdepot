@@ -8,12 +8,16 @@
 # Idempotent.
 
 param(
-    [switch]$NoPause
+    [switch]$NoPause,
+    # The folder setup-langtechdepot.bat was started from, passed in by the
+    # .bat. This script itself runs from a temporary copy, so it cannot find
+    # that folder on its own; it is where a hand-placed syncthing.exe lives.
+    [string]$From = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-# Central exit point so -NoPause (passed by run-setup-langtechdepot.bat, which
+# Central exit point so -NoPause (passed by setup-langtechdepot.bat, which
 # already pauses itself) is honored everywhere the script can stop, instead of
 # only at the very end.
 function Exit-Script {
@@ -36,23 +40,64 @@ $CONFIG_DIR = "$env:LOCALAPPDATA\langtechdepot"
 New-Item -ItemType Directory -Force -Path $BIN_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $CONFIG_DIR | Out-Null
 
-# Download Syncthing if not present
+# Get Syncthing. This script never downloads an executable itself: antivirus
+# dropper heuristics flag a script that fetches a binary and then registers it
+# to run at startup, and that has already cost this project an installer.
+# Syncthing comes from winget, or from a syncthing.exe the user put beside the
+# .bat by hand, and is copied to $BIN so the rest of the script, and the
+# startup shortcut, always have one fixed path.
+function Find-WingetSyncthing {
+    # winget unpacks portable packages (Syncthing is one) under this folder
+    # when installed with --scope user.
+    $root = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+    if (-not (Test-Path $root)) { return $null }
+    $exe = Get-ChildItem -Path $root -Directory -Filter "Syncthing.Syncthing_*" -ErrorAction SilentlyContinue |
+        ForEach-Object { Get-ChildItem -Path $_.FullName -Recurse -Filter "syncthing.exe" -ErrorAction SilentlyContinue } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($exe) { return $exe.FullName }
+    return $null
+}
+
 if (-not (Test-Path $BIN)) {
-    Write-Host "Downloading Syncthing..."
-    $releaseJson = Invoke-RestMethod -Uri "https://api.github.com/repos/syncthing/syncthing/releases/latest"
-    $asset = $releaseJson.assets | Where-Object {$_.name -like "*windows-amd64*.zip" } | Select-Object -First 1
+    $source = $null
 
-    $tmpZip = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName() + ".zip")
-    $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+    # 1. A copy the user placed beside the .bat by hand.
+    if ($From) {
+        $handPlaced = Join-Path $From "syncthing.exe"
+        if (Test-Path $handPlaced) { $source = $handPlaced }
+    }
 
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmpZip
-    Expand-Archive -Path $tmpZip -DestinationPath $tmpDir
+    # 2. One that winget installed earlier.
+    if (-not $source) { $source = Find-WingetSyncthing }
 
-    $exePath = Get-ChildItem -Path $tmpDir -Recurse -Filter "syncthing.exe" | Select-Object -First 1
-    Copy-Item -Path $exePath.FullName -Destination $BIN -Force
-    
-    Remove-Item -Path $tmpZip -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    # 3. Ask winget for it. --scope user needs no administrator rights, and a
+    #    machine-scope install leaves syncthing.exe unreadable to normal users.
+    if (-not $source) {
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-Host "Installing Syncthing with winget..."
+            # winget reports failure through its exit code, not an exception,
+            # and "already installed" also counts as failure - so the result
+            # is judged by whether syncthing.exe is there afterwards.
+            & winget install --id Syncthing.Syncthing --exact --scope user --silent `
+                --accept-package-agreements --accept-source-agreements
+            $source = Find-WingetSyncthing
+        } else {
+            Write-Host "winget is not available on this computer."
+        }
+    }
+
+    if (-not $source) {
+        Write-Host ""
+        Write-Host "Could not get Syncthing onto this computer."
+        Write-Host "Download Syncthing for Windows (64-bit) from https://syncthing.net/downloads/"
+        Write-Host "take syncthing.exe out of it, put it in the same folder as"
+        Write-Host "setup-langtechdepot.bat, and double-click the .bat again."
+        Write-Host "More help: $HELP_URL"
+        Exit-Script -Code 1
+    }
+
+    Copy-Item -Path $source -Destination $BIN -Force
 }
 Write-Host "Using Syncthing at $BIN"
 

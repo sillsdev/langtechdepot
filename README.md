@@ -53,11 +53,12 @@ build step, no framework, no web fonts, no bitmap images: the audience is on
 slow links and the illustrations are inline SVG.
 
 [.github/workflows/pages.yml](.github/workflows/pages.yml) publishes it on
-every push to `main`, building the Windows installer into
-`downloads/setup-langtechdepot.bat` on the way so the site can offer a single
-file to download. The `.bat` is built rather than committed — a committed copy
-is a second copy of the installer, and the second copy is the one that goes
-stale. The workflow also fails, publishing nothing, if any page links to a
+every push to `main`, building the Windows installer and packing it into
+`downloads/langtechdepot-windows.zip` on the way, so the site can offer a
+single file to download that browsers and mail filters let through (a bare
+`.bat` gets questioned). The `.bat` is built rather than committed — a
+committed copy is a second copy of the installer, and the second copy is the
+one that goes stale. The workflow also fails, publishing nothing, if any page links to a
 download it did not build. **One-time setting:** Settings → Pages → Source →
 *GitHub Actions*.
 
@@ -95,17 +96,25 @@ Two things bite when hand-writing the SVG:
 
 ## Install (what the site tells people)
 
-**Windows** — download `setup-langtechdepot.bat` and double-click it. It
-downloads the latest Syncthing release from GitHub into
-`%LOCALAPPDATA%\Programs\Syncthing\`; if that download is blocked,
-`syncthing.exe` can be put in that folder by hand and the installer uses it.
+**Windows** — download `langtechdepot-windows.zip`, open it, double-click
+`setup-langtechdepot.bat`. No extracting needed: the `.bat` is self-contained,
+and Explorer runs it from a temporary copy (so the zip window should stay open
+until it finishes). It installs Syncthing through winget
+(`--scope user`, so no admin rights); on a machine without winget,
+the zip is extracted and `syncthing.exe` put beside the `.bat` by hand. Either
+way it is copied to `%LOCALAPPDATA%\Programs\Syncthing\`, the fixed path the
+startup shortcut uses. Nothing here ever downloads the executable itself —
+antivirus dropper heuristics flag scripts that fetch a binary and then
+register it for startup.
 
 The `.bat` exists because a stock Windows machine refuses to run a downloaded
 `.ps1` at all: right-clicking the script and choosing **Run with PowerShell**
 fails, and the window closes before the reason is readable. So the one file
 carries `setup-langtechdepot.ps1` inside itself below a marker line. At run
-time it extracts that part to a temporary `.ps1`, runs it, deletes it, and
-waits for a key before closing, so anything that goes wrong stays on screen.
+time it extracts that part to a temporary `.ps1`, runs it with `-From` set to
+the `.bat`'s own folder (where a hand-placed `syncthing.exe` is looked for),
+deletes it, and waits for a key before closing, so anything that goes wrong
+stays on screen.
 
 Edit only `client/setup-langtechdepot.ps1`. The `.bat` is built from
 `client/setup-langtechdepot.bat.in` (the launcher, ending at the marker line)
@@ -162,6 +171,7 @@ docs/    index.html                  the instructions site: which computer?
 client/  setup-langtechdepot.ps1     field installer (Windows) - edit this
          setup-langtechdepot.bat.in  launcher that the .ps1 is wrapped in
          build-bat.sh                builds setup-langtechdepot.bat from those two
+         START-HERE.txt              rides along in the Windows zip
          install-langtechdepot.sh    field installer (Linux)
          langtechdepot-subscribe.ps1|sh   CLI catalog list / subscribe
 server/  SETUP.md                    server standup guide

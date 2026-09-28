@@ -35,34 +35,34 @@
   <h2>The black window closed before I could read it</h2>
   <p>The installer waits for you to press a key before its window closes, so
   any error stays on screen. If the window vanished anyway, your antivirus may
-  have stopped it (see <a href="#antivirus">below</a>). Otherwise, download a
-  fresh copy of <code>setup-langtechdepot.bat</code> and double-click it
-  again.</p>
+  have stopped it (see <a href="#antivirus">below</a>). It can also happen if
+  the zip window was closed while the installer was still running. Run it
+  again and leave the zip window open until it finishes; or unzip the
+  download first &mdash; right-click it &rarr; <strong>Extract All</strong>
+  &rarr; <strong>Extract</strong> &mdash; and double-click
+  <code>setup-langtechdepot.bat</code> in the folder that opens.</p>
 
   <h2>Windows says &ldquo;Windows protected your PC&rdquo;</h2>
   <p>Click <strong>More info</strong>, then <strong>Run anyway</strong>. This
   appears for anything downloaded from the internet that has not been through
   Microsoft&rsquo;s paid signing programme.</p>
 
-  <h2>My browser will not keep the download</h2>
-  <p>Some browsers question any <code>.bat</code> file. Open the
-  browser&rsquo;s list of downloads, click the <strong>&hellip;</strong> or
-  arrow beside <code>setup-langtechdepot.bat</code>, and choose
-  <strong>Keep</strong>.</p>
-
   <h2>It says something went wrong extracting the installer</h2>
-  <p>The file was damaged or cut short on the way down. Delete it, download
-  <code>setup-langtechdepot.bat</code> again, and double-click the new
-  copy.</p>
+  <p>The download was damaged or cut short. Delete it, download
+  <code>langtechdepot-windows.zip</code> again, and double-click the
+  <code>setup-langtechdepot.bat</code> inside the new one.</p>
 
-  <h2>It could not download Syncthing</h2>
-  <p>The installer fetches Syncthing itself, and some networks block that.
-  Download it yourself from
+  <h2>It says it could not get Syncthing</h2>
+  <p>The installer gets Syncthing through <em>winget</em>, Windows&rsquo; own
+  app installer. Some machines do not have it, and some networks block it.
+  Download Syncthing yourself from
   <a href="https://syncthing.net/downloads/">syncthing.net/downloads</a>
   (the Windows 64-bit archive) and take <code>syncthing.exe</code> out of it.
-  Type <code>%LOCALAPPDATA%\Programs\Syncthing</code> into the address bar of
-  File Explorer, put <code>syncthing.exe</code> in that folder, and run the
-  <code>.bat</code> again. It uses the copy it finds there.</p>
+  This is the one case where the LangTechDepot zip must be unpacked first:
+  right-click it &rarr; <strong>Extract All</strong> &rarr;
+  <strong>Extract</strong>, put <code>syncthing.exe</code> in the folder that
+  opens, beside <code>setup-langtechdepot.bat</code>, and double-click the
+  <code>.bat</code> there. It uses the copy it finds beside it.</p>
 
   <h2 id="antivirus">My antivirus deleted the installer</h2>
   <p>Some antivirus products remove scripts they have not seen before. Restore

@@ -32,7 +32,11 @@ if not exist "%PAYLOAD%" (
     exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PAYLOAD%" -NoPause
+REM -From tells the installer which folder this .bat is in, so it can find a
+REM syncthing.exe put beside it by hand. %~dp0 ends in a backslash, and a
+REM backslash right before the closing quote would escape the quote itself;
+REM the trailing "." names the same folder without that problem.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PAYLOAD%" -NoPause -From "%~dp0."
 
 REM Stashed before pause and before del, either of which could reset
 REM ERRORLEVEL, so an unattended caller still sees whether the install

@@ -39,8 +39,9 @@ docs/    index.html                     the instructions site: which computer?
          windows.html · linux.html      four steps, with inline-SVG pictures
          help.html                      what normally goes wrong
          assets/site.css · site.js      shared look with register.py's pages
-client/  run-setup-langtechdepot.bat    double-click wrapper for the .ps1 (owns the pause)
-         setup-langtechdepot.ps1        Windows installer
+client/  setup-langtechdepot.ps1        Windows installer - the one copy; edit this
+         setup-langtechdepot.bat.in     CMD launcher the .ps1 is wrapped in (owns the pause)
+         build-bat.sh                   .bat.in + .ps1 -> setup-langtechdepot.bat (gitignored)
          install-langtechdepot.sh       Linux installer
          langtechdepot-subscribe.ps1|sh CLI catalog list / subscribe
          START-HERE.txt                 rides along inside the Windows zip
@@ -50,7 +51,7 @@ server/  register.py                    registration service + admin CLI (stdlib
          token_backup.sh                nightly sqlite .backup, 30-day retention
          SETUP.md                       server standup guide (the real deployment doc)
          langtechdepot-register.service · register.env.example · Caddyfile.example
-.github/workflows/pages.yml            builds the zip, publishes docs/ to Pages
+.github/workflows/pages.yml            builds the .bat and the zip, publishes docs/ to Pages
 ```
 
 Deploy target is the California repository server. Nothing here is deployed from this
@@ -98,10 +99,12 @@ only stops the reconciler from re-adding it.
 
 - **`register.py` is stdlib-only** apart from `python-dotenv`. Keep it that way; the server
   gets `apt install python3-dotenv` and nothing else. No Flask, no requests.
-- **Line endings are enforced** by `.gitattributes`: `.ps1` is CRLF, `.sh`/`.py`/`.service`
-  are LF. Don't fight it.
-- **The Windows installer never downloads an executable.** It uses winget or a
-  hand-placed `syncthing.exe`. Antivirus dropper heuristics flag scripts that fetch a binary
+- **Line endings are enforced** by `.gitattributes`: `.ps1`, `.bat`, `.bat.in` and `.txt`
+  are CRLF, `.sh`/`.py`/`.service` are LF. Don't fight it: CMD misreads a `.bat` with
+  LF-only endings, and `build-bat.sh` and the workflow both refuse to ship one.
+- **The Windows installer never downloads an executable.** It uses winget
+  (`--scope user`) or a `syncthing.exe` hand-placed beside the `.bat`, which reaches the
+  script as `-From` because the `.ps1` itself runs from a temporary copy. Antivirus dropper heuristics flag scripts that fetch a binary
   and then register it for startup — this cost us an installer already (see Traps).
 - **Folder IDs are permanent.** They are what users see and what `langtechdepot-subscribe`
   takes as an argument. Never rename a published one.
@@ -118,8 +121,10 @@ only stops the reconciler from re-adding it.
 - **Quote every attribute in the inline SVG.** `stroke-width=2/>` parses as
   `stroke-width="2/"`, the tag never closes, and every following shape becomes an
   invisible child of the first one — a blank illustration with no error anywhere.
-- The Windows zip is **built by CI, never committed**: a committed copy of the
-  installers is a second copy, and the second copy goes stale.
+- **The Windows `.bat` and zip are built, never committed.** The user downloads one zip
+  holding `setup-langtechdepot.bat` (the `.ps1` carried inside it below a marker line)
+  and `START-HERE.txt`. Edit only the `.ps1`; run `sh client/build-bat.sh` for a `.bat`
+  to test. A committed copy is a second copy, and the second copy goes stale.
 - Service binds localhost only; Caddy terminates TLS and also serves `/files` as a browsable
   tree of `/data/LT/Groups` for single-installer downloads.
 
