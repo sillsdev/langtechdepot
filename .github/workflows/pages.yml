@@ -1,9 +1,9 @@
 # Publishes docs/ as the instructions site, with the client installers packed
 # alongside it as downloads.
 #
-# The installers are copied here from client/ rather than committed under
-# docs/, so that there is exactly one copy of each installer in this repo. A
-# second copy is the one that goes stale.
+# The installers are built and copied here from client/ rather than committed
+# under docs/, so that there is exactly one copy of each installer in this
+# repo. A second copy is the one that goes stale.
 #
 # One-time repository setting: Settings -> Pages -> Source -> "GitHub Actions".
 # Without it this workflow runs green and publishes nothing.
@@ -40,13 +40,22 @@ jobs:
           set -eu
           mkdir -p _site/downloads
           cp -r docs/. _site/
-          # Windows: one self-contained file. setup-langtechdepot.bat is built
-          # here from the launcher header plus setup-langtechdepot.ps1, which
-          # it extracts and runs at install time - so there is nothing to
-          # unzip, and the .ps1 is the only copy of the installer anyone edits.
-          # .gitattributes checks both halves out CRLF even on Linux, and the
-          # build joins them byte for byte, so it arrives as a Windows file.
-          sh client/build-bat.sh _site/downloads/setup-langtechdepot.bat
+          # Windows: setup-langtechdepot.bat is built here from the launcher
+          # header plus setup-langtechdepot.ps1, which it extracts and runs at
+          # install time, so the .ps1 is the only copy anyone edits. It ships
+          # in a zip with START-HERE.txt: browsers and mail filters wave a zip
+          # through where they question a bare .bat. .gitattributes checks
+          # everything out CRLF even on Linux, and the build and zip keep the
+          # bytes untouched, so they arrive as Windows files.
+          mkdir -p _build
+          sh client/build-bat.sh _build/setup-langtechdepot.bat
+          # CMD misparses a .bat with LF-only line endings; build-bat.sh checks
+          # its inputs, and this checks the result before it is packed.
+          grep -q $'\r$' _build/setup-langtechdepot.bat \
+            || { echo "setup-langtechdepot.bat lost its CRLF line endings"; exit 1; }
+          zip -j _site/downloads/langtechdepot-windows.zip \
+            _build/setup-langtechdepot.bat \
+            client/START-HERE.txt
           # Linux: the installer is fetched by the one command on linux.html.
           cp client/install-langtechdepot.sh _site/downloads/
           # Both platforms: the optional command-line catalog tool.
@@ -59,7 +68,7 @@ jobs:
           # A renamed installer silently turns the download buttons into 404s,
           # and nobody notices until a field user reports it. Catch it here.
           fail=0
-          for f in downloads/setup-langtechdepot.bat \
+          for f in downloads/langtechdepot-windows.zip \
                    downloads/install-langtechdepot.sh \
                    index.html windows.html linux.html help.html \
                    assets/site.css assets/site.js; do
@@ -71,10 +80,10 @@ jobs:
           for f in $(grep -oh 'href="downloads/[^"]*"' _site/*.html | sed 's/^href="//; s/"$//' | sort -u); do
             [ -s "_site/$f" ] || { echo "a page links to $f, which was not built"; fail=1; }
           done
-          # CMD misparses a .bat with LF-only line endings; make sure the CRLF
-          # rule in .gitattributes actually held.
-          grep -q $'\r$' _site/downloads/setup-langtechdepot.bat \
-            || { echo "setup-langtechdepot.bat lost its CRLF line endings"; fail=1; }
+          # The zip must hold the installer under the name the pages tell
+          # people to double-click.
+          unzip -l _site/downloads/langtechdepot-windows.zip | grep -q ' setup-langtechdepot.bat$' \
+            || { echo "langtechdepot-windows.zip has no setup-langtechdepot.bat"; fail=1; }
           exit $fail
 
       - uses: actions/upload-pages-artifact@v3
