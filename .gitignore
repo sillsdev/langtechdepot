@@ -14,3 +14,8 @@ docs/_preview/
 */.install*.sh
 */.Install*.bat
 */.setup*.bat
+
+# Built from setup-langtechdepot.bat.in + setup-langtechdepot.ps1 by
+# client/build-bat.sh (locally, and by the Pages workflow). Never committed:
+# the .ps1 is the one copy of the installer.
+client/setup-langtechdepot.bat

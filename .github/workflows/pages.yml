@@ -1,8 +1,8 @@
 # Publishes docs/ as the instructions site, with the client installers packed
 # alongside it as downloads.
 #
-# The zip is built here rather than committed so that there is exactly one copy
-# of every installer in this repo. A committed zip is a second copy, and the
+# The installers are copied here from client/ rather than committed under
+# docs/, so that there is exactly one copy of each installer in this repo. A
 # second copy is the one that goes stale.
 #
 # One-time repository setting: Settings -> Pages -> Source -> "GitHub Actions".
@@ -40,13 +40,13 @@ jobs:
           set -eu
           mkdir -p _site/downloads
           cp -r docs/. _site/
-          # Windows: one file to download, holding the two that must sit side
-          # by side. .gitattributes checks these out CRLF even on Linux, and
-          # zip stores bytes untouched, so they arrive as Windows files.
-          zip -j _site/downloads/langtechdepot-windows.zip \
-            client/run-setup-langtechdepot.bat \
-            client/setup-langtechdepot.ps1 \
-            client/START-HERE.txt
+          # Windows: one self-contained file. setup-langtechdepot.bat is built
+          # here from the launcher header plus setup-langtechdepot.ps1, which
+          # it extracts and runs at install time - so there is nothing to
+          # unzip, and the .ps1 is the only copy of the installer anyone edits.
+          # .gitattributes checks both halves out CRLF even on Linux, and the
+          # build joins them byte for byte, so it arrives as a Windows file.
+          sh client/build-bat.sh _site/downloads/setup-langtechdepot.bat
           # Linux: the installer is fetched by the one command on linux.html.
           cp client/install-langtechdepot.sh _site/downloads/
           # Both platforms: the optional command-line catalog tool.
@@ -59,12 +59,22 @@ jobs:
           # A renamed installer silently turns the download buttons into 404s,
           # and nobody notices until a field user reports it. Catch it here.
           fail=0
-          for f in downloads/langtechdepot-windows.zip \
+          for f in downloads/setup-langtechdepot.bat \
                    downloads/install-langtechdepot.sh \
                    index.html windows.html linux.html help.html \
                    assets/site.css assets/site.js; do
             [ -s "_site/$f" ] || { echo "missing or empty: $f"; fail=1; }
           done
+          # Every downloads/ link in the pages must point at a file that was
+          # actually built, so a page still naming an old installer fails here
+          # instead of publishing a dead button.
+          for f in $(grep -oh 'href="downloads/[^"]*"' _site/*.html | sed 's/^href="//; s/"$//' | sort -u); do
+            [ -s "_site/$f" ] || { echo "a page links to $f, which was not built"; fail=1; }
+          done
+          # CMD misparses a .bat with LF-only line endings; make sure the CRLF
+          # rule in .gitattributes actually held.
+          grep -q $'\r$' _site/downloads/setup-langtechdepot.bat \
+            || { echo "setup-langtechdepot.bat lost its CRLF line endings"; fail=1; }
           exit $fail
 
       - uses: actions/upload-pages-artifact@v3

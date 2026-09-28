@@ -1,0 +1,46 @@
+@echo off
+setlocal EnableExtensions
+
+REM =============================================================================
+REM  LangTechDepot installer for Windows - double-click this file.
+REM
+REM  This one .bat file carries the entire PowerShell installer as plain text
+REM  below the marker line further down this file. Windows won't run a
+REM  downloaded .ps1 just by right-clicking it, so at run time this batch
+REM  file extracts everything after that marker into a temporary .ps1 file
+REM  and runs it the one way that works without changing any machine-wide
+REM  setting - so a field user still only has ONE file to download and
+REM  double-click, with no second file to keep alongside it.
+REM
+REM  CMD reads this file line by line and stops the instant it hits
+REM  "exit /b" below, so everything after the marker - including all the
+REM  PowerShell syntax - is never seen or parsed by CMD at all. Only
+REM  PowerShell ever reads that part, via the one-liner just below. That
+REM  one-liner deliberately avoids "|", "<", ">" and "&" since CMD treats
+REM  those as its own pipe/redirection characters even inside quotes.
+REM =============================================================================
+
+set "PAYLOAD=%TEMP%\langtechdepot-setup-%RANDOM%.ps1"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$m='#--LANGTECHDEPOT-PS1-PAYLOAD-BELOW--#';$l=[System.IO.File]::ReadAllLines('%~f0');$i=-1;for($j=0;$j -lt $l.Length;$j++){if($l[$j] -eq $m){$i=$j+1;break}};if($i -lt 0){Write-Error 'Could not find the embedded installer inside this file.';exit 1};[System.IO.File]::WriteAllLines('%PAYLOAD%',$l[$i..($l.Length-1)])"
+
+if not exist "%PAYLOAD%" (
+    echo Something went wrong extracting the installer from this file.
+    echo Please try downloading it again.
+    echo.
+    pause
+    exit /b 1
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PAYLOAD%" -NoPause
+
+REM Stashed before pause and before del, either of which could reset
+REM ERRORLEVEL, so an unattended caller still sees whether the install
+REM actually worked.
+set RC=%ERRORLEVEL%
+del "%PAYLOAD%" >nul 2>&1
+echo.
+pause
+exit /b %RC%
+
+#--LANGTECHDEPOT-PS1-PAYLOAD-BELOW--#

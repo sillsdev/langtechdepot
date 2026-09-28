@@ -33,31 +33,38 @@
   space or a line break at the end will fail.</p>
 
   <h2>The black window closed before I could read it</h2>
-  <p>Then it was not started the documented way. Double-click
-  <code>run-setup-langtechdepot.bat</code> &mdash; not the
-  <code>.ps1</code> file. The <code>.bat</code> holds the window open so any
-  error stays on screen.</p>
+  <p>The installer waits for you to press a key before its window closes, so
+  any error stays on screen. If the window vanished anyway, your antivirus may
+  have stopped it (see <a href="#antivirus">below</a>). Otherwise, download a
+  fresh copy of <code>setup-langtechdepot.bat</code> and double-click it
+  again.</p>
 
   <h2>Windows says &ldquo;Windows protected your PC&rdquo;</h2>
   <p>Click <strong>More info</strong>, then <strong>Run anyway</strong>. This
   appears for anything downloaded from the internet that has not been through
   Microsoft&rsquo;s paid signing programme.</p>
 
-  <h2>It cannot find <code>setup-langtechdepot.ps1</code></h2>
-  <p>The two files are not side by side. Almost always this means the zip was
-  never unpacked: right-click the downloaded zip &rarr; <strong>Extract
-  All</strong> &rarr; <strong>Extract</strong>, then open the extracted folder
-  and double-click the <code>.bat</code> in <em>there</em>.</p>
+  <h2>My browser will not keep the download</h2>
+  <p>Some browsers question any <code>.bat</code> file. Open the
+  browser&rsquo;s list of downloads, click the <strong>&hellip;</strong> or
+  arrow beside <code>setup-langtechdepot.bat</code>, and choose
+  <strong>Keep</strong>.</p>
 
-  <h2>It cannot find Syncthing</h2>
-  <p>The machine has no <em>winget</em>, so the installer could not fetch
-  Syncthing for you. Download it yourself from
+  <h2>It says something went wrong extracting the installer</h2>
+  <p>The file was damaged or cut short on the way down. Delete it, download
+  <code>setup-langtechdepot.bat</code> again, and double-click the new
+  copy.</p>
+
+  <h2>It could not download Syncthing</h2>
+  <p>The installer fetches Syncthing itself, and some networks block that.
+  Download it yourself from
   <a href="https://syncthing.net/downloads/">syncthing.net/downloads</a>
-  (the Windows 64-bit archive), put <code>syncthing.exe</code> in the same
-  extracted folder as the other two files, and run the <code>.bat</code>
-  again.</p>
+  (the Windows 64-bit archive) and take <code>syncthing.exe</code> out of it.
+  Type <code>%LOCALAPPDATA%\Programs\Syncthing</code> into the address bar of
+  File Explorer, put <code>syncthing.exe</code> in that folder, and run the
+  <code>.bat</code> again. It uses the copy it finds there.</p>
 
-  <h2>My antivirus deleted the installer</h2>
+  <h2 id="antivirus">My antivirus deleted the installer</h2>
   <p>Some antivirus products remove scripts they have not seen before. Restore
   it from the quarantine list, or ask whoever manages the machine to allow the
   folder. Tell us if this happens &mdash; it is worth knowing which product.</p>

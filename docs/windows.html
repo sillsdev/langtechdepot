@@ -67,7 +67,7 @@
     <p>One small file. Your <strong>Downloads</strong> folder is a fine place
     for it.</p>
     <div class="art">
-      <svg viewBox="0 0 320 120" width="320" role="img" aria-label="A zip file downloading, then unpacked into a folder holding two files">
+      <svg viewBox="0 0 320 120" width="320" role="img" aria-label="One installer file downloading into the Downloads folder">
         <path d="M42 32a20 20 0 0 1 38-7 15 15 0 0 1 4 29H46a16 16 0 0 1-4-22z" fill="var(--brand)" opacity=".22"/>
         <path d="M62 54v26" stroke="var(--brand)" stroke-width="5" stroke-linecap="round"/>
         <path d="M50 72l12 15 12-15z" fill="var(--brand)"/>
@@ -75,29 +75,26 @@
         <path d="M118 60h26" stroke="var(--ink-soft)" stroke-width="3" stroke-linecap="round" opacity=".55"/>
         <path d="M142 53l10 7-10 7z" fill="var(--ink-soft)" opacity=".55"/>
         <path d="M170 32h30l7 9h55a5 5 0 0 1 5 5v52a5 5 0 0 1-5 5h-92a5 5 0 0 1-5-5V37a5 5 0 0 1 5-5z" fill="var(--brand)" opacity=".2"/>
-        <rect x="186" y="52" width="38" height="48" rx="4" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
-        <rect x="234" y="52" width="38" height="48" rx="4" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
-        <rect x="194" y="64" width="22" height="4" rx="2" fill="var(--ink-soft)" opacity=".45"/>
-        <rect x="194" y="74" width="15" height="4" rx="2" fill="var(--ink-soft)" opacity=".45"/>
-        <rect x="242" y="64" width="22" height="4" rx="2" fill="var(--ink-soft)" opacity=".45"/>
-        <rect x="242" y="74" width="15" height="4" rx="2" fill="var(--ink-soft)" opacity=".45"/>
+        <rect x="200" y="48" width="44" height="52" rx="4" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
+        <path d="M232 48v12h12" fill="none" stroke="var(--line)" stroke-width="2"/>
+        <text x="222" y="84" text-anchor="middle" font-size="12" font-weight="700" fill="var(--brand)" font-family="system-ui,sans-serif">BAT</text>
       </svg>
     </div>
-    <a class="btn big" href="downloads/langtechdepot-windows.zip" download>Download for Windows</a>
-    <span class="sub-btn">langtechdepot-windows.zip &middot; under 10&nbsp;KB</span>
-    <div class="note warn">
-      <strong>Unzip it before you open anything inside it.</strong>
-      Right-click the downloaded file &rarr; <strong>Extract All</strong> &rarr;
-      <strong>Extract</strong>. Double-clicking straight out of the zip preview
-      window looks like it works and then fails: Windows unpacks only the one
-      file you clicked, and the installer needs both of them side by side.
+    <a class="btn big" href="downloads/setup-langtechdepot.bat" download>Download for Windows</a>
+    <span class="sub-btn">setup-langtechdepot.bat &middot; about 35&nbsp;KB</span>
+    <div class="note">
+      <strong>If your browser warns about the download:</strong> some browsers
+      question any <code>.bat</code> file, saying it is not commonly downloaded
+      or could be harmful. Open the browser&rsquo;s list of downloads, click
+      the <strong>&hellip;</strong> or arrow beside this file, and choose
+      <strong>Keep</strong>.
     </div>
   </section>
 
   <!-- 3 -------------------------------------------------------------- -->
   <section class="step">
     <div class="num">3</div>
-    <h3>Double-click <code>run-setup-langtechdepot.bat</code></h3>
+    <h3>Double-click <code>setup-langtechdepot.bat</code></h3>
     <p>A black window opens and does the work. When it asks for your token,
     paste it in &mdash; right-click inside the window, or press
     <strong>Ctrl</strong>+<strong>V</strong> &mdash; and press
@@ -126,11 +123,14 @@
       been through Microsoft&rsquo;s paid signing programme.
     </div>
     <div class="note">
-      <strong>If it says it cannot find Syncthing:</strong>
-      this machine has no <em>winget</em>. Download Syncthing for Windows from
-      <a href="https://syncthing.net/downloads/">syncthing.net/downloads</a>,
-      put <code>syncthing.exe</code> in the same extracted folder as the other
-      two files, and double-click the <code>.bat</code> again.
+      <strong>If it cannot download Syncthing:</strong>
+      the installer fetches Syncthing itself, and some networks block that.
+      Download Syncthing for Windows from
+      <a href="https://syncthing.net/downloads/">syncthing.net/downloads</a>
+      (the 64-bit archive) and take <code>syncthing.exe</code> out of it. Type
+      <code>%LOCALAPPDATA%\Programs\Syncthing</code> into the address bar of
+      File Explorer, put <code>syncthing.exe</code> in that folder, and
+      double-click the <code>.bat</code> again.
     </div>
   </section>
 
