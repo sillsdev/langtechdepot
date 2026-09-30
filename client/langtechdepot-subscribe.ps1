@@ -50,9 +50,15 @@ function Get-SyncthingConfig {
     )
     foreach ($path in $candidates) {
         if (Test-Path $path) {
+            # XmlDocument.Load, not [xml](Get-Content ...): Windows PowerShell's
+            # Get-Content reads UTF-8 without a byte-order mark (as config.xml
+            # is) in the ANSI code page. Harmless for the API key, but this
+            # keeps every reader of config.xml the same.
+            $xml = New-Object System.Xml.XmlDocument
+            $xml.Load($path)
             return [pscustomobject]@{
                 Path = $path
-                Key  = ([xml](Get-Content $path)).configuration.gui.apikey
+                Key  = $xml.configuration.gui.apikey
             }
         }
     }

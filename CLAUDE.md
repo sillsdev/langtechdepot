@@ -117,6 +117,16 @@ only stops the reconciler from re-adding it.
   Syncthing instance instead of borrowing the user's personal one, which matters because
   registration PATCHes `defaults/folder` to receive-only and would otherwise rewrite
   *their* defaults. Don't hardcode the GUI port either: first start probes for a free one.
+- **Never load `config.xml` with `[xml](Get-Content ...)`.** Use
+  `$x = New-Object System.Xml.XmlDocument; $x.PreserveWhitespace = $true; $x.Load($path)`.
+  Without `PreserveWhitespace`, `$x.Save()` re-indents the whole file and splits every
+  empty element over two lines (`<urUniqueID>`, newline, indent, `</urUniqueID>`);
+  Syncthing then stores that whitespace as the value and writes it back as
+  `&#xA;        `. This was blamed on Syncthing for a while; it was ours. And Windows
+  PowerShell's `Get-Content` reads BOM-less UTF-8 as ANSI, garbling non-ASCII names.
+  Raw-text edits go through `[IO.File]::ReadAllText/WriteAllText` with UTF-8, not
+  `Get-Content`/`Set-Content`. (The installer still carries a clean-up for configs the
+  old helper damaged; see "CLEAN-UP FOR CONFIGS DAMAGED BY EARLIER VERSIONS".)
 - Installers are idempotent and re-runnable.
 - **Quote every attribute in the inline SVG.** `stroke-width=2/>` parses as
   `stroke-width="2/"`, the tag never closes, and every following shape becomes an

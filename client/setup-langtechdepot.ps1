@@ -101,16 +101,36 @@ if (-not (Test-Path $BIN)) {
 }
 Write-Host "Using Syncthing at $BIN"
 
-# Helper functions for reading/writing values in config.xml
+# Helper functions for reading/writing values in config.xml.
+#
+# Both load the file with XmlDocument.Load and PreserveWhitespace = $true,
+# never with [xml](Get-Content ...). Two reasons:
+#  - Without PreserveWhitespace, XmlDocument.Save re-indents the WHOLE file,
+#    and writes every empty element (e.g. <urUniqueID></urUniqueID>) as an
+#    open tag, a line break, indentation and a close tag. Syncthing then reads
+#    that line break and indentation as the field's value, and saves it back
+#    as <urUniqueID>&#xA;        </urUniqueID>. This damage was long blamed on
+#    Syncthing; it came from here. With PreserveWhitespace, Save writes the
+#    file back exactly as it was read, apart from the node we changed.
+#  - Windows PowerShell's Get-Content reads a UTF-8 file that has no
+#    byte-order mark (as config.xml is) in the local ANSI code page, which
+#    garbles non-ASCII device and folder names. XmlDocument.Load reads UTF-8.
+# (The document is built inside each function rather than returned from a
+# shared helper, because PowerShell would unroll a returned XmlDocument into
+# its child nodes.)
 function Get-XmlNodeText {
     param([string]$path, [string]$xpath)
-    [xml]$xml = Get-Content -Path $path
+    $xml = New-Object System.Xml.XmlDocument
+    $xml.PreserveWhitespace = $true
+    $xml.Load($path)
     return $xml.SelectSingleNode($xpath).InnerText
 }
 
 function Set-XmlNodeText {
     param([string]$path, [string]$xpath, [string]$value)
-    [xml]$xml = Get-Content -Path $path
+    $xml = New-Object System.Xml.XmlDocument
+    $xml.PreserveWhitespace = $true
+    $xml.Load($path)
     $node = $xml.SelectSingleNode($xpath)
     if ($node) {
         $node.InnerText = $value
@@ -119,40 +139,43 @@ function Set-XmlNodeText {
 }
 
 # ============================================================================
-# WORKAROUND FOR UPSTREAM SYNCTHING BUG - START (function definition)
+# CLEAN-UP FOR CONFIGS DAMAGED BY EARLIER VERSIONS OF THIS INSTALLER - START
 # ----------------------------------------------------------------------------
-# Syncthing itself (not this script) corrupts empty-string fields whenever it
-# rewrites config.xml: instead of writing e.g. <encryptionPassword></encryptionPassword>
-# it writes <encryptionPassword>&#xA;        </encryptionPassword> - a literal
-# escaped-newline entity plus trailing indentation spaces, sitting inside a
-# tag that is supposed to be empty. We confirmed this happens even on fields
-# this script never sends (urUniqueID, auditFile, internal
-# <defaults><folder><device> entries that Syncthing builds on its own), so
-# it's a bug in Syncthing's own config serializer, not something caused by
-# this script's REST API payloads. Explicitly sending "" for a field in our
-# POST/PATCH bodies does NOT prevent this - Syncthing corrupts it again the
-# next time it rewrites the file regardless of what we sent. Reported
-# upstream: [add issue URL here once filed].
+# Earlier versions of Set-XmlNodeText (above) re-indented config.xml and so
+# split every empty element over two lines. Syncthing stored that line break
+# and indentation as the field's value, and has written it out ever since as
+# e.g. <encryptionPassword>&#xA;        </encryptionPassword>. The helper is
+# fixed, so a fresh install no longer gets this damage, but machines set up
+# with an older installer keep it until something clears it.
 #
-# This function repairs the raw XML text after the fact, turning that
-# corrupted pattern back into a clean empty element. It must only be run
-# while Syncthing is NOT running, since it edits config.xml directly on
-# disk and Syncthing would either lock the file or overwrite/re-corrupt our
-# fix the next time it saves its own config.
+# Test-ConfigNeedsRepair says whether config.xml still carries that damage;
+# Repair-CorruptedEmptyXmlFields turns it back into clean empty elements.
+# The repair edits config.xml directly, so it must only be run while
+# Syncthing is NOT running. Both read (and the repair writes) UTF-8
+# explicitly: Get-Content/Set-Content in Windows PowerShell would use the
+# ANSI code page and garble non-ASCII names.
 #
-# TO REMOVE THIS WORKAROUND once Syncthing ships a fix: delete this whole
-# function, and delete both places later in this script that call it
-# (search for "WORKAROUND FOR UPSTREAM SYNCTHING BUG"). The pre-workaround
-# version of this script is checked into the repo for reference/rollback.
+# TO REMOVE once no field machine still has an old-installer config: delete
+# these two functions and the block near the end of this script that calls
+# them (search for "CLEAN-UP FOR CONFIGS DAMAGED BY EARLIER VERSIONS").
+$DamagedEmptyElement = '<(\w+)([^>]*)>&#xA;\s*</\1>'
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+function Test-ConfigNeedsRepair {
+    param([string]$path)
+    $raw = [System.IO.File]::ReadAllText($path, $Utf8NoBom)
+    return ($raw -match $DamagedEmptyElement)
+}
+
 function Repair-CorruptedEmptyXmlFields {
     param([string]$path)
-    $raw = Get-Content -Path $path -Raw
-    $fixed = $raw -replace '<(\w+)([^>]*)>&#xA;\s*</\1>', '<$1$2></$1>'
+    $raw = [System.IO.File]::ReadAllText($path, $Utf8NoBom)
+    $fixed = $raw -replace $DamagedEmptyElement, '<$1$2></$1>'
     if ($fixed -ne $raw) {
-        Set-Content -Path $path -Value $fixed -NoNewline
+        [System.IO.File]::WriteAllText($path, $fixed, $Utf8NoBom)
     }
 }
-# WORKAROUND FOR UPSTREAM SYNCTHING BUG - END (function definition)
+# CLEAN-UP FOR CONFIGS DAMAGED BY EARLIER VERSIONS OF THIS INSTALLER - END
 # ============================================================================
 
 # Generate config.xml if it does not exist. "generate" has no flag to set the
@@ -165,13 +188,6 @@ $isFreshInstall = -not (Test-Path $configFile)
 if ($isFreshInstall) {
     Start-Process -FilePath $BIN -ArgumentList "generate", "--home", $CONFIG_DIR -NoNewWindow -Wait
     Set-XmlNodeText -path $configFile -xpath "//configuration/gui/address" -value "127.0.0.1:8384"
-
-    # WORKAROUND FOR UPSTREAM SYNCTHING BUG (call site 1 of 2) - see the
-    # Repair-CorruptedEmptyXmlFields function above for the full explanation.
-    # "generate" itself already writes corrupted empty fields (e.g.
-    # urUniqueID, auditFile) into the brand-new config.xml, so we clean it up
-    # here too, before Syncthing is even running for the first time.
-    Repair-CorruptedEmptyXmlFields -path $configFile
 }
 
 # Run Syncthing in the background at logon, via a Startup-folder shortcut.
@@ -318,12 +334,8 @@ if ($SERVER_ID) {
 
     # NOTE: encryptionPassword is not a valid field on this top-level device
     # registry object (it only exists on a per-folder device-share entry -
-    # see the /rest/config/folders calls further down), so Syncthing's REST
-    # API silently drops it if we send it here; sending it was tried and
-    # confirmed to have no effect. The actual corrupted-empty-field bug is
-    # fixed for this entry, and everywhere else, by the end-of-script repair
-    # pass - see Repair-CorruptedEmptyXmlFields and its second call site
-    # near the end of this script.
+    # see the /rest/config/folders calls further down), so it is not sent
+    # here; Syncthing's REST API would silently drop it.
     Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/devices" -Body @{
         deviceID   = $SERVER_ID
         name       = $SERVER_NAME
@@ -416,12 +428,8 @@ New-Item -ItemType Directory -Force -Path $AUTO_FOLDER_PATH | Out-Null
 
 # encryptionPassword IS a valid field on this per-folder device-share entry
 # (unlike the top-level device registry entry above, where it's silently
-# ignored). It's kept explicit here since it's schema-valid and harmless,
-# but on its own it does NOT stop Syncthing corrupting this field when it
-# next rewrites config.xml - that's handled instead by the end-of-script
-# repair pass (see Repair-CorruptedEmptyXmlFields, called near the end of
-# this script). This explicit "" can be left as-is or removed once the
-# upstream bug is fixed; it's harmless either way.
+# ignored). "" means this device is trusted and gets the files unencrypted,
+# which is Syncthing's default anyway; it is spelled out here for clarity.
 Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
     id              = $AUTO_FOLDER_ID
     label           = "All_Contents_List -- a list of all files available"
@@ -789,10 +797,9 @@ foreach ($item in $selections) {
         } else {
             $folderPath = Join-Path $DATA_ROOT $fid
             try {
-                # See the matching comment on the All_Contents_List folder call
-                # above: encryptionPassword is schema-valid and harmless here,
-                # but the actual fix for the corrupted-empty-field bug is the
-                # end-of-script repair pass, not this explicit "".
+                # encryptionPassword = "" as for the All_Contents_List folder
+                # above: schema-valid, Syncthing's default, spelled out for
+                # clarity.
                 Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
                     id              = $fid
                     label           = $desc
@@ -837,36 +844,32 @@ foreach ($item in $selections) {
 }
 
 # ============================================================================
-# WORKAROUND FOR UPSTREAM SYNCTHING BUG (call site 2 of 2) - START
+# CLEAN-UP FOR CONFIGS DAMAGED BY EARLIER VERSIONS OF THIS INSTALLER
 # ----------------------------------------------------------------------------
-# See Repair-CorruptedEmptyXmlFields near the top of this script for the
-# full explanation. All the device/folder registration above has now run,
-# each one an occasion for Syncthing to have corrupted some empty field in
-# config.xml again, so we do one last repair pass here. Syncthing has to be
-# stopped first - it holds config.xml open and would either block our edit
-# or overwrite it the next time it autosaves - and then restarted the same
-# way it was started earlier in this script.
-#
-# TO REMOVE THIS WORKAROUND once Syncthing ships a fix: delete this whole
-# block (both the Stop-Process and the restart), leaving just the Write-Host
-# messages above and "Exit-Script -Code 0" below.
-Write-Host " "
-Write-Host "Applying a temporary workaround for a known Syncthing config bug..."
-$syncthingProc = Get-Process -Name "syncthing" -ErrorAction SilentlyContinue
-if ($syncthingProc) {
-    $syncthingProc | Stop-Process -Force
-    # Give Windows a moment to fully release the file handle on config.xml
-    # before we try to edit it.
+# See Test-ConfigNeedsRepair / Repair-CorruptedEmptyXmlFields near the top of
+# this script. Only a machine first set up with an older installer has this
+# damage, so on most runs nothing is found and Syncthing is left running.
+# When there is damage, Syncthing has to be stopped first - it holds
+# config.xml open and would overwrite our fix the next time it saves - and
+# then restarted the same way it was started earlier in this script.
+if (Test-ConfigNeedsRepair -path $configFile) {
+    Write-Host " "
+    Write-Host "Tidying up config.xml (left untidy by an earlier version of this installer)..."
+    $syncthingProc = Get-Process -Name "syncthing" -ErrorAction SilentlyContinue
+    if ($syncthingProc) {
+        $syncthingProc | Stop-Process -Force
+        # Give Windows a moment to fully release the file handle on config.xml
+        # before we try to edit it.
+        Start-Sleep -Seconds 2
+    }
+
+    Repair-CorruptedEmptyXmlFields -path $configFile
+
+    # Restart the same way it's started earlier in this script (see the
+    # "Make sure it's running right now too" block above).
+    Start-Process -FilePath $BIN -ArgumentList "serve", "--no-browser", "--home", $CONFIG_DIR -WindowStyle Hidden
     Start-Sleep -Seconds 2
 }
-
-Repair-CorruptedEmptyXmlFields -path $configFile
-
-# Restart the same way it's started earlier in this script (see the
-# "Make sure it's running right now too" block above).
-Start-Process -FilePath $BIN -ArgumentList "serve", "--no-browser", "--home", $CONFIG_DIR -WindowStyle Hidden
-Start-Sleep -Seconds 2
-# WORKAROUND FOR UPSTREAM SYNCTHING BUG - END
 # ============================================================================
 
 Write-Host " "
