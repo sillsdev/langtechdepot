@@ -133,8 +133,12 @@ automatically, registers the machine, and opens the web GUI at
 <http://127.0.0.1:8384>. Files land under `~/LangTechDepot/` (or
 `%USERPROFILE%\LangTechDepot\`).
 
-`langtechdepot-subscribe.sh` / `.ps1` list the catalog and subscribe by folder
-ID for anyone who prefers the command line.
+For anyone who prefers the command line: on Windows the installer also installs
+itself as `modify-langtechdepot.bat`, on the user's PATH, so that
+`modify-langtechdepot list`, `modify-langtechdepot add <FolderID>...` and
+`modify-langtechdepot ignore <FolderID>...` work from any new Command Prompt
+(with no arguments it is the installer again, dialog and all). On Linux,
+`langtechdepot-subscribe.sh` lists the catalog and subscribes by folder ID.
 
 Folders are **receive-only** on the client: local edits and deletions are
 flagged and revertible, and nothing local propagates outward.
@@ -173,7 +177,8 @@ client/  setup-langtechdepot.ps1     field installer (Windows) - edit this
          build-bat.sh                builds setup-langtechdepot.bat from those two
          START-HERE.txt              rides along in the Windows zip
          install-langtechdepot.sh    field installer (Linux)
-         langtechdepot-subscribe.ps1|sh   CLI catalog list / subscribe
+         langtechdepot-subscribe.sh  CLI catalog list / subscribe (Linux; Windows
+                                     uses modify-langtechdepot, i.e. the installer)
 server/  SETUP.md                    server standup guide
          register.py                 registration service + admin CLI
          langtechdepot-register.service   systemd unit

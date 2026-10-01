@@ -5,14 +5,31 @@
 #   using the token you were issued.
 # Auto-subscribes to All_Contents_List, and lets you choose folders to install or ignore,
 #   using checkboxes. Run it again later to add folders or take back ignored ones.
+# Also installs itself as modify-langtechdepot.bat, for changing folders from a
+#   Command Prompt without the dialog - see "Command-line mode" below.
 # Idempotent.
 
+# PositionalBinding off: only the two parameters given a Position below take
+# bare words, so "modify-langtechdepot add Android_apps" can never land in
+# -From or -Self by accident.
+[CmdletBinding(PositionalBinding = $false)]
 param(
+    # What to change when run as "modify-langtechdepot <action> <folder IDs>":
+    # add, ignore or list. Empty means the ordinary installer, dialog and all.
+    [Parameter(Position = 0)]
+    [string]$Action = "",
+    [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
+    [string[]]$FolderIDs = @(),
     [switch]$NoPause,
     # The folder setup-langtechdepot.bat was started from, passed in by the
     # .bat. This script itself runs from a temporary copy, so it cannot find
     # that folder on its own; it is where a hand-placed syncthing.exe lives.
-    [string]$From = ""
+    [string]$From = "",
+    # The .bat file this script was carried in, and the name it was started
+    # by (without ".bat"), both passed in by the .bat. $Self is what gets
+    # copied to modify-langtechdepot.bat; $InvokedAs tells the two names apart.
+    [string]$Self = "",
+    [string]$InvokedAs = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,6 +46,67 @@ function Exit-Script {
     exit $Code
 }
 
+# -----------------------------------------------------------------------------
+# Command-line mode: modify-langtechdepot add|ignore|list [folder IDs]
+# -----------------------------------------------------------------------------
+# The installer copies its own .bat beside LangTechDepot's syncthing.exe as
+# modify-langtechdepot.bat and puts that folder on the user's PATH (see
+# "Install modify-langtechdepot" below), so from any new Command Prompt:
+#   modify-langtechdepot add Android_apps Keyman   subscribe (un-ignoring if needed)
+#   modify-langtechdepot ignore Android_apps       unsubscribe and ignore
+#   modify-langtechdepot list                      every folder and its state
+# Only the folders named are changed; everything else is left as it is, and
+# no dialog is shown. With no arguments it is the ordinary installer. It is
+# the same script either way, so there is no second program to keep in step.
+$ScriptName = if ($InvokedAs) { $InvokedAs } else { "setup-langtechdepot" }
+$Action = $Action.Trim().ToLowerInvariant()
+$CliMode = [bool]$Action
+
+function Show-Usage {
+    Write-Host "Usage:"
+    Write-Host "  $ScriptName add <FolderID> [<FolderID> ...]     subscribe to folders"
+    Write-Host "  $ScriptName ignore <FolderID> [<FolderID> ...]  stop syncing folders, and ignore them"
+    Write-Host "  $ScriptName list                                show every folder and its state"
+    Write-Host "  $ScriptName                                     choose folders in a window"
+}
+
+if ($CliMode) {
+    if ($Action -in @("help", "/?", "/h")) {
+        Show-Usage
+        Exit-Script -Code 0
+    }
+    if ($Action -notin @("add", "ignore", "list")) {
+        Write-Host "${ScriptName}: '$Action' is not something this can do."
+        Show-Usage
+        Exit-Script -Code 2
+    }
+    if ($Action -eq "list" -and $FolderIDs.Count -gt 0) {
+        Write-Host "${ScriptName}: 'list' takes no folder IDs."
+        Show-Usage
+        Exit-Script -Code 2
+    }
+    if ($Action -ne "list" -and $FolderIDs.Count -eq 0) {
+        Write-Host "${ScriptName}: '$Action' needs at least one folder ID."
+        Show-Usage
+        Exit-Script -Code 2
+    }
+} elseif ($ScriptName -eq "modify-langtechdepot") {
+    Write-Host "modify-langtechdepot: You didn't specify any changes. Please respond to the dialog appearing soon:"
+    Write-Host "(For the command-line way, type: modify-langtechdepot help)"
+    Write-Host ""
+}
+
+# Progress messages and reading pauses meant for someone watching the
+# installer. A command-line run skips them and says only what changed.
+function Write-Chatter {
+    param([string]$Text = " ")
+    if (-not $CliMode) { Write-Host $Text }
+}
+function Wait-ForReader {
+    param([int]$Seconds)
+    if (-not $CliMode) { Start-Sleep -Seconds $Seconds }
+}
+
 # Path definitions
 $REGISTER_URL = "https://depot.langtech.cloud"
 $HELP_URL     = "https://sillsdev.github.io/langtechdepot/help.html"
@@ -36,6 +114,13 @@ $HELP_URL     = "https://sillsdev.github.io/langtechdepot/help.html"
 $BIN_DIR    = "$env:LOCALAPPDATA\Programs\Syncthing"
 $BIN        = "$BIN_DIR\syncthing.exe"
 $CONFIG_DIR = "$env:LOCALAPPDATA\langtechdepot"
+
+# Command-line mode only changes an existing setup; it never starts one.
+if ($CliMode -and -not (Test-Path (Join-Path $CONFIG_DIR "config.xml"))) {
+    Write-Host "${ScriptName}: LangTechDepot is not set up on this computer yet."
+    Write-Host "Run setup-langtechdepot.bat first. More help: $HELP_URL"
+    Exit-Script -Code 1
+}
 
 New-Item -ItemType Directory -Force -Path $BIN_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $CONFIG_DIR | Out-Null
@@ -99,7 +184,7 @@ if (-not (Test-Path $BIN)) {
 
     Copy-Item -Path $source -Destination $BIN -Force
 }
-Write-Host "Using Syncthing at $BIN"
+Write-Chatter "Using Syncthing at $BIN"
 
 # Helper functions for reading/writing values in config.xml.
 #
@@ -243,7 +328,7 @@ function Invoke-SyncthingApi {
     }
 }
 
-Write-Host "Waiting for Syncthing..."
+Write-Chatter "Waiting for Syncthing..."
 $connected = $false
 for ($i = 0; $i -lt 30; $i++) {
     try {
@@ -265,8 +350,8 @@ $DEVICE_NAME = "$env:USERNAME-$env:COMPUTERNAME"
 # Set Device Name
 Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$MY_ID" -Body @{ name = $DEVICE_NAME } | Out-Null
 
-Write-Host ""
-Write-Host "This machine's device ID: $MY_ID"
+Write-Chatter ""
+Write-Chatter "This machine's device ID: $MY_ID"
 
 # -----------------------------------------------------------------------------
 # Check if registered with LangTechDepot Server
@@ -283,9 +368,14 @@ try {
 } catch {}
 
 if ($SERVER_ID) {
-    Write-Host "Already registered with $SERVER_NAME."
-    Start-Sleep -Seconds 3
-    Write-Host " "
+    Write-Chatter "Already registered with $SERVER_NAME."
+    Wait-ForReader -Seconds 3
+    Write-Chatter " "
+} elseif ($CliMode) {
+    # Asking for a token in the middle of a command would be a surprise.
+    Write-Host "${ScriptName}: this computer is not registered with LangTechDepot yet."
+    Write-Host "Run setup-langtechdepot.bat and enter your token first. More help: $HELP_URL"
+    Exit-Script -Code 1
 } else {
     Write-Host "No token yet? Register at $REGISTER_URL"
     Write-Host ""
@@ -343,6 +433,55 @@ if ($SERVER_ID) {
         introducer = $true
     } | Out-Null
 }
+
+# -----------------------------------------------------------------------------
+# Install modify-langtechdepot
+# -----------------------------------------------------------------------------
+# A copy of the very .bat this run came from, under a second name, beside
+# LangTechDepot's syncthing.exe; and that folder on the user's PATH, so
+# "modify-langtechdepot ..." works in any Command Prompt opened afterwards.
+# Re-copied on every run, so it is always the installer that last ran. Both
+# are per-user and need no administrator rights. Neither is fatal: the
+# installer's real job gets done without them.
+function Add-ToUserPath {
+    param([string]$Dir)
+    try {
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
+        # Read the raw text, so entries such as %USERPROFILE%\... stay
+        # unexpanded, and write it back as the same REG_EXPAND_SZ type.
+        # [Environment]::Get/SetEnvironmentVariable would expand them all
+        # and turn the value into a plain string.
+        $raw = [string]$key.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $entries = @($raw -split ";" | Where-Object { $_ })
+        $already = $entries | Where-Object {
+            [Environment]::ExpandEnvironmentVariables($_).TrimEnd("\") -ieq $Dir.TrimEnd("\")
+        }
+        if (-not $already) {
+            $key.SetValue("Path", ((@($entries) + $Dir) -join ";"), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+            # Tell Windows the environment changed, so Command Prompts opened
+            # from now on see the new PATH without logging out. .NET sends
+            # that notice after any change to a user variable, so clearing a
+            # variable that does not exist is the simplest way to send it.
+            [Environment]::SetEnvironmentVariable("LANGTECHDEPOT_PATH_NOTICE", $null, "User")
+        }
+        $key.Close()
+    } catch {
+        Write-Host "Note: could not add $Dir to your PATH: $_"
+    }
+}
+
+$ModifyBat = Join-Path $BIN_DIR "modify-langtechdepot.bat"
+if ($Self -and (Test-Path $Self)) {
+    try {
+        # When this run IS modify-langtechdepot.bat, it is already in place.
+        if ([System.IO.Path]::GetFullPath($Self) -ine [System.IO.Path]::GetFullPath($ModifyBat)) {
+            Copy-Item -Path $Self -Destination $ModifyBat -Force
+        }
+    } catch {
+        Write-Host "Note: could not install modify-langtechdepot: $_"
+    }
+}
+if (Test-Path $ModifyBat) { Add-ToUserPath -Dir $BIN_DIR }
 
 # -----------------------------------------------------------------------------
 # Where LangTechDepot's synced files live
@@ -419,11 +558,11 @@ $AUTO_FOLDER_ID   = "All_Contents_List"
 $AUTO_FOLDER_PATH = Join-Path $DATA_ROOT $AUTO_FOLDER_ID
 $CATALOG_FILE     = Join-Path $AUTO_FOLDER_PATH "LangTechDepotFiles.txt"
 
-Write-Host "Subscribing to $AUTO_FOLDER_ID, which contains a list"
-Write-Host "of all the files available in the Depot"
-Write-Host "and the size of each folder you can subscribe to ..."
-Write-Host " "
-Start-Sleep -Seconds 4
+Write-Chatter "Subscribing to $AUTO_FOLDER_ID, which contains a list"
+Write-Chatter "of all the files available in the Depot"
+Write-Chatter "and the size of each folder you can subscribe to ..."
+Write-Chatter " "
+Wait-ForReader -Seconds 4
 New-Item -ItemType Directory -Force -Path $AUTO_FOLDER_PATH | Out-Null
 
 # encryptionPassword IS a valid field on this per-folder device-share entry
@@ -440,13 +579,15 @@ Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
     devices         = @(@{ deviceID = $SERVER_ID; encryptionPassword = "" })
 } | Out-Null
 
-Write-Host "Sync data root: $DATA_ROOT"
-Write-Host "Automatically subscribed to: $AUTO_FOLDER_ID"
-Write-Host "The folder catalog will appear within a minute or two."
-Write-Host " "
-Start-Sleep -Seconds 4
+Write-Chatter "Sync data root: $DATA_ROOT"
+Write-Chatter "Automatically subscribed to: $AUTO_FOLDER_ID"
+Write-Chatter "The folder catalog will appear within a minute or two."
+Write-Chatter " "
+Wait-ForReader -Seconds 4
 
-Write-Host "Waiting for catalog file to sync from server..."
+if (-not (Test-Path $CATALOG_FILE) -or (Get-Item $CATALOG_FILE).Length -eq 0) {
+    Write-Host "Waiting for catalog file to sync from server..."
+}
 $catalogTimeoutSeconds = 180
 $catalogWaited = 0
 while (-not (Test-Path $CATALOG_FILE) -or (Get-Item $CATALOG_FILE).Length -eq 0) {
@@ -461,6 +602,59 @@ while (-not (Test-Path $CATALOG_FILE) -or (Get-Item $CATALOG_FILE).Length -eq 0)
         Write-Host "'Up to Date' there, just run this installer again to pick your folders."
         Exit-Script -Code 1
     }
+}
+
+# -----------------------------------------------------------------------------
+# What is on offer, and what this device already has
+# -----------------------------------------------------------------------------
+# Shared by the dialog and by command-line mode. Each returns a plain array;
+# callers wrap the call in @(...), since PowerShell unrolls a returned
+# collection and a single item would otherwise stop being an array.
+
+# Folders listed in the catalog file, in catalog order.
+function Get-CatalogEntries {
+    param([string]$CatalogPath)
+    $entries = [System.Collections.ArrayList]::new()
+    $inFolders = $false
+    foreach ($line in (Get-Content $CatalogPath)) {
+        $line = $line.Trim()
+        if ($line -like "*Folders available, with their sizes*") { $inFolders = $true; continue }
+        if ($line -like "*Individual files available*") { break }
+        if (-not $inFolders -or -not $line) { continue }
+
+        if ($line -match '^\s*(\S+)\s+(\S+?)\s*"(.*)"\s*$') {
+            $entries.Add([PSCustomObject]@{
+                Size        = $matches[1]
+                FolderID    = $matches[2]
+                Description = $matches[3]
+            }) | Out-Null
+        }
+    }
+    return $entries.ToArray()
+}
+
+# IDs of the folders this device syncs now.
+function Get-SubscribedFolderIds {
+    $ids = [System.Collections.ArrayList]::new()
+    try {
+        foreach ($fld in (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/folders")) {
+            if ($fld.id) { $ids.Add([string]$fld.id) | Out-Null }
+        }
+    } catch {}
+    return $ids.ToArray()
+}
+
+# IDs of the folders this device has told the server to stop offering.
+function Get-IgnoredFolderIds {
+    param([string]$ServerID)
+    $ids = [System.Collections.ArrayList]::new()
+    try {
+        $devCfg = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices/$ServerID"
+        foreach ($item in $devCfg.ignoredFolders) {
+            if ($item.id) { $ids.Add([string]$item.id) | Out-Null }
+        }
+    } catch {}
+    return $ids.ToArray()
 }
 
 # -----------------------------------------------------------------------------
@@ -480,54 +674,37 @@ function Show-FolderSelectionForm {
     # Starting every row unticked would make "Apply" unsubscribe the user from
     # everything they chose on an earlier run.
     $ignored = [System.Collections.Generic.HashSet[string]]::new()
-    try {
-        $devCfg = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices/$ServerID"
-        foreach ($item in $devCfg.ignoredFolders) {
-            if ($item.id) { $ignored.Add($item.id) | Out-Null }
-        }
-    } catch {}
+    foreach ($id in @(Get-IgnoredFolderIds -ServerID $ServerID)) { $ignored.Add($id) | Out-Null }
 
     $subscribed = [System.Collections.Generic.HashSet[string]]::new()
-    try {
-        foreach ($fld in (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/folders")) {
-            if ($fld.id) { $subscribed.Add($fld.id) | Out-Null }
-        }
-    } catch {}
+    foreach ($id in @(Get-SubscribedFolderIds)) { $subscribed.Add($id) | Out-Null }
 
-    # Parse catalog file. Every folder is read; ignored ones are held back
-    # until the user asks to see them.
+    # Every folder in the catalog is listed; ignored ones are held back until
+    # the user asks to see them.
     $shownRows  = [System.Collections.ArrayList]::new()
     $hiddenRows = [System.Collections.ArrayList]::new()
-    $inFolders = $false
     $sawAlwaysShow = $false
 
-    foreach ($line in (Get-Content $CatalogPath)) {
-        $line = $line.Trim()
-        if ($line -like "*Folders available, with their sizes*") { $inFolders = $true; continue }
-        if ($line -like "*Individual files available*") { break }
-        if (-not $inFolders -or -not $line) { continue }
+    foreach ($entry in @(Get-CatalogEntries -CatalogPath $CatalogPath)) {
+        $fid = $entry.FolderID
+        $isAlways = ($fid -eq $AlwaysShowID)
+        if ($isAlways) { $sawAlwaysShow = $true }
 
-        if ($line -match '^\s*(\S+)\s+(\S+?)\s*"(.*)"\s*$') {
-            $fid = $matches[2]
-            $isAlways = ($fid -eq $AlwaysShowID)
-            if ($isAlways) { $sawAlwaysShow = $true }
+        if ($isAlways -or $subscribed.Contains($fid)) { $status = "subscribed" }
+        elseif ($ignored.Contains($fid))              { $status = "ignored" }
+        else                                          { $status = "new" }
 
-            if ($isAlways -or $subscribed.Contains($fid)) { $status = "subscribed" }
-            elseif ($ignored.Contains($fid))              { $status = "ignored" }
-            else                                          { $status = "new" }
-
-            $row = [PSCustomObject]@{
-                Subscribe   = ($isAlways -or $subscribed.Contains($fid))
-                Status      = $status
-                Size        = $matches[1]
-                FolderID    = $fid
-                Description = $matches[3]
-            }
-            # The catalog folder is never hidden, even if it was ignored on an
-            # earlier run: the installer subscribes to it again every time.
-            if ($status -eq "ignored" -and -not $isAlways) { $hiddenRows.Add($row) | Out-Null }
-            else                                           { $shownRows.Add($row) | Out-Null }
+        $row = [PSCustomObject]@{
+            Subscribe   = ($isAlways -or $subscribed.Contains($fid))
+            Status      = $status
+            Size        = $entry.Size
+            FolderID    = $fid
+            Description = $entry.Description
         }
+        # The catalog folder is never hidden, even if it was ignored on an
+        # earlier run: the installer subscribes to it again every time.
+        if ($status -eq "ignored" -and -not $isAlways) { $hiddenRows.Add($row) | Out-Null }
+        else                                           { $shownRows.Add($row) | Out-Null }
     }
 
     # If the catalog does not list the catalog folder itself, still show it.
@@ -725,11 +902,80 @@ function Show-FolderSelectionForm {
     return $results
 }
 
-$selections = Show-FolderSelectionForm -CatalogPath $CATALOG_FILE -ServerID $SERVER_ID -AlwaysShowID $AUTO_FOLDER_ID
+if ($CliMode) {
+    # The same list of changes the dialog would hand back, but naming only
+    # the folders given on the command line - anything not named is left
+    # exactly as it is. Everything is checked before anything is changed, so
+    # one mistyped ID changes nothing at all.
+    $catalogEntries = @(Get-CatalogEntries -CatalogPath $CATALOG_FILE)
+    $subscribedNow  = @(Get-SubscribedFolderIds)
+    $ignoredNow     = @(Get-IgnoredFolderIds -ServerID $SERVER_ID)
 
-if (-not $selections) {
-    Write-Host "Operation cancelled."
-    Exit-Script -Code 0
+    if ($Action -eq "list") {
+        $fmt = "  {0,-11} {1,8}  {2,-28} {3}"
+        Write-Host ($fmt -f "Now", "Size", "Folder ID", "Description")
+        $listed = @()
+        foreach ($e in $catalogEntries) {
+            $state = if ($subscribedNow -contains $e.FolderID) { "subscribed" }
+                     elseif ($ignoredNow -contains $e.FolderID) { "ignored" }
+                     else { "new" }
+            Write-Host ($fmt -f $state, $e.Size, $e.FolderID, $e.Description)
+            $listed += $e.FolderID
+        }
+        # Anything this device still has that the catalog no longer lists.
+        foreach ($id in ($subscribedNow + $ignoredNow)) {
+            if ($listed -contains $id) { continue }
+            $state = if ($subscribedNow -contains $id) { "subscribed" } else { "ignored" }
+            Write-Host ($fmt -f $state, "", $id, "(not in the catalog)")
+            $listed += $id
+        }
+        Exit-Script -Code 0
+    }
+
+    $known = @($catalogEntries | ForEach-Object { $_.FolderID }) + $subscribedNow + $ignoredNow
+    $selections = [System.Collections.ArrayList]::new()
+    $chosen = @()
+    $problems = 0
+    foreach ($want in $FolderIDs) {
+        # Folder IDs are case-sensitive to Syncthing, but nobody should have
+        # to get the capitals right at a command prompt.
+        $fid = $known | Where-Object { $_ -ceq $want } | Select-Object -First 1
+        if (-not $fid) { $fid = $known | Where-Object { $_ -ieq $want } | Select-Object -First 1 }
+        if (-not $fid) {
+            Write-Host "${ScriptName}: there is no folder called '$want'. Type '$ScriptName list' to see them all."
+            $problems++
+            continue
+        }
+        if ($Action -eq "ignore" -and $fid -eq $AUTO_FOLDER_ID) {
+            Write-Host "${ScriptName}: $AUTO_FOLDER_ID cannot be ignored - it holds the list of"
+            Write-Host "everything available, and LangTechDepot always subscribes to it again."
+            $problems++
+            continue
+        }
+        if ($chosen -contains $fid) { continue }
+        $chosen += $fid
+        $entry = $catalogEntries | Where-Object { $_.FolderID -ceq $fid } | Select-Object -First 1
+        $size = ""
+        $desc = $fid
+        if ($entry) { $size = $entry.Size; $desc = $entry.Description }
+        $selections.Add(@{
+            Subscribe   = ($Action -eq "add")
+            Size        = $size
+            FolderID    = $fid
+            Description = $desc
+        }) | Out-Null
+    }
+    if ($problems) {
+        Write-Host "Nothing was changed."
+        Exit-Script -Code 1
+    }
+} else {
+    $selections = Show-FolderSelectionForm -CatalogPath $CATALOG_FILE -ServerID $SERVER_ID -AlwaysShowID $AUTO_FOLDER_ID
+
+    if (-not $selections) {
+        Write-Host "Operation cancelled."
+        Exit-Script -Code 0
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -783,6 +1029,9 @@ function Set-FolderIgnored {
     }
 }
 
+# Counted so that command-line mode can end with a failing exit code.
+$Failures = 0
+
 foreach ($item in $selections) {
     $fid   = $item.FolderID
     $desc  = $item.Description
@@ -812,6 +1061,7 @@ foreach ($item in $selections) {
                 Write-Host "Successfully subscribed to: $fid"
             } catch {
                 Write-Host "Failed to subscribe to $fid"
+                $Failures++
             }
         }
         # A folder ticked after "Also display ignored folders" comes off the
@@ -820,6 +1070,7 @@ foreach ($item in $selections) {
             Set-FolderIgnored -FolderID $fid -Label $desc -Ignore $false
         } catch {
             Write-Host "Warning: Could not un-ignore $fid via API: $_"
+            $Failures++
         }
     }
     # 2. IGNORE (-)
@@ -831,6 +1082,7 @@ foreach ($item in $selections) {
                 Write-Host "Removed active subscription for: $fid"
             } catch {
                 Write-Host "Warning: Could not remove active folder $fid"
+                $Failures++
             }
         }
 
@@ -839,6 +1091,7 @@ foreach ($item in $selections) {
             Set-FolderIgnored -FolderID $fid -Label $desc -Ignore $true
         } catch {
             Write-Host "Warning: Could not ignore $fid via API: $_"
+            $Failures++
         }
     }
 }
@@ -872,10 +1125,26 @@ if (Test-ConfigNeedsRepair -path $configFile) {
 }
 # ============================================================================
 
+if ($CliMode) {
+    if ($Failures) {
+        Write-Host "${ScriptName}: $Failures change(s) failed - see above."
+        Exit-Script -Code 1
+    }
+    Write-Host "Done. Progress is on the Syncthing page at $GUI_URL"
+    Exit-Script -Code 0
+}
+
 Write-Host " "
 Write-Host "To add more folders later, or take back one you ignored,"
 Write-Host "just run this installer again. In the folder list, click"
 Write-Host "'Also display ignored folders' to see the ones you ignored."
+if (Test-Path $ModifyBat) {
+    Write-Host " "
+    Write-Host "Or, in a Command Prompt opened from now on, type for example:"
+    Write-Host "    modify-langtechdepot list"
+    Write-Host "    modify-langtechdepot add Android_apps"
+    Write-Host "    modify-langtechdepot ignore Android_apps"
+}
 Write-Host " "
 Write-Host "If you ever need to manage Syncthing directly, open $GUI_URL."
 

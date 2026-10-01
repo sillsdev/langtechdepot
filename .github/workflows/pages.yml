@@ -58,9 +58,10 @@ jobs:
             client/START-HERE.txt
           # Linux: the installer is fetched by the one command on linux.html.
           cp client/install-langtechdepot.sh _site/downloads/
-          # Both platforms: the optional command-line catalog tool.
+          # Linux: the optional command-line catalog tool. (Windows has none
+          # to download: the installer installs itself as
+          # modify-langtechdepot.bat, which does the same job.)
           cp client/langtechdepot-subscribe.sh _site/downloads/
-          cp client/langtechdepot-subscribe.ps1 _site/downloads/
 
       - name: Check the download links resolve
         run: |

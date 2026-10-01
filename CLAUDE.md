@@ -43,7 +43,7 @@ client/  setup-langtechdepot.ps1        Windows installer - the one copy; edit t
          setup-langtechdepot.bat.in     CMD launcher the .ps1 is wrapped in (owns the pause)
          build-bat.sh                   .bat.in + .ps1 -> setup-langtechdepot.bat (gitignored)
          install-langtechdepot.sh       Linux installer
-         langtechdepot-subscribe.ps1|sh CLI catalog list / subscribe
+         langtechdepot-subscribe.sh     CLI catalog list / subscribe (Linux only)
          START-HERE.txt                 rides along inside the Windows zip
 server/  register.py                    registration service + admin CLI (stdlib + dotenv)
          test_register.py               end-to-end test against a stub Syncthing
@@ -106,8 +106,17 @@ only stops the reconciler from re-adding it.
   (`--scope user`) or a `syncthing.exe` hand-placed beside the `.bat`, which reaches the
   script as `-From` because the `.ps1` itself runs from a temporary copy. Antivirus dropper heuristics flag scripts that fetch a binary
   and then register it for startup — this cost us an installer already (see Traps).
-- **Folder IDs are permanent.** They are what users see and what `langtechdepot-subscribe`
-  takes as an argument. Never rename a published one.
+- **Folder IDs are permanent.** They are what users see and what
+  `modify-langtechdepot` (Windows) and `langtechdepot-subscribe` (Linux) take as an
+  argument. Never rename a published one.
+- **`modify-langtechdepot` is the Windows installer itself**, not a second program.
+  Each run copies the `.bat` it came from to `%LOCALAPPDATA%\Programs\Syncthing\` (beside
+  our `syncthing.exe`) as `modify-langtechdepot.bat`, and adds that folder to the user
+  PATH (HKCU, no admin). `modify-langtechdepot add|ignore <ids>` / `list` go through
+  the same code as the dialog but change only the folders named, with no dialog and no
+  pause; with no arguments it is the ordinary installer. Command-line features go into
+  `setup-langtechdepot.ps1`; don't bring back a separate Windows subscribe script — two
+  programs doing one job drift apart.
 - **Syncthing's config PATCH replaces child arrays wholesale**, so `share_catalog_with()`
   does read-modify-write on the device list rather than appending. Preserve that shape.
 - **Both installers pin Syncthing's `--home`.** Syncthing resolves its config dir by

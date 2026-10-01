@@ -70,7 +70,8 @@ One Syncthing folder per subscription group, pointed at the **existing** repo
 directories (no data migration). For each folder in the GUI:
 
 - **Folder ID**: short stable slug (`software-core`, `training-videos`, ...).
-  This is what users see and what `langtechdepot-subscribe` takes as an argument.
+  This is what users see and what `modify-langtechdepot` (Windows) and
+  `langtechdepot-subscribe` (Linux) take as an argument.
   Never change an ID once published.
 - **Folder Path**: the existing directory.
 - **Folder Type**: **Send Only**.

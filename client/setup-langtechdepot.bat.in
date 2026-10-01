@@ -36,15 +36,25 @@ REM -From tells the installer which folder this .bat is in, so it can find a
 REM syncthing.exe put beside it by hand. %~dp0 ends in a backslash, and a
 REM backslash right before the closing quote would escape the quote itself;
 REM the trailing "." names the same folder without that problem.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PAYLOAD%" -NoPause -From "%~dp0."
+REM -Self is this .bat file: the installer copies it beside syncthing.exe as
+REM modify-langtechdepot.bat. -InvokedAs is the name it was started by, so
+REM the installer knows which of the two it is.
+REM %* passes on whatever was typed after the name, unchanged - e.g.
+REM "modify-langtechdepot add Android_apps" - for command-line mode.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PAYLOAD%" -NoPause -From "%~dp0." -Self "%~f0" -InvokedAs "%~n0" %*
 
 REM Stashed before pause and before del, either of which could reset
 REM ERRORLEVEL, so an unattended caller still sees whether the install
 REM actually worked.
 set RC=%ERRORLEVEL%
 del "%PAYLOAD%" >nul 2>&1
-echo.
-pause
+REM No pause when arguments were given: whoever typed them is already at a
+REM Command Prompt, and the window stays open anyway. Double-clicked, or
+REM run with no arguments, the window must wait to be read.
+if "%~1"=="" (
+    echo.
+    pause
+)
 exit /b %RC%
 
 #--LANGTECHDEPOT-PS1-PAYLOAD-BELOW--#
