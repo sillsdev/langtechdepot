@@ -189,8 +189,9 @@ only stops the reconciler from re-adding it.
   exist yet — see #15 and the comments on #24. `docs/help.html` still says "reply to the
   email your token arrived in"; fix that line, `MAIL_FROM` and the SMTP settings together
   once the mailbox is live.
-- **The Linux picker needs `yad`**, and the installer does not check for it. Without it
-  the dialog fails, and the script reports "Operation cancelled." and exits 0 — after
-  registering, with nothing subscribed but `All_Contents_List`.
+- **The Linux picker needs `yad`.** The installer checks for it first and exits 1
+  before registering. Keep that check above the token prompt: when the dialog fails
+  later, the script reports "Operation cancelled." and exits 0, with a token spent and
+  nothing subscribed but `All_Contents_List`.
 - The project was renamed twice — LangTran → LangTechDepot, and the `-sync` suffix dropped.
   Stale `langtran` strings may still surface in older docs and external references.
