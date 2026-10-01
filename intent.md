@@ -11,8 +11,8 @@ internet is poor, expensive, unreliable or absent.
 
 **Who it is for.** Anyone doing language work among minority languages. It is an open
 website, not an invitation list, and it is particularly meant to support language-based
-development and Bible translation. The software repository it distributes is SIL's and includes other useful free software; the
-audience is not limited to SIL.
+development and Bible translation. The software repository it distributes is SIL's, and
+includes other useful free software from elsewhere; the audience is not limited to SIL.
 
 **What their machines are like.** Around fifty field machines today, Windows and Linux,
 no administrator rights, on links that are slow, metered, or intermittent. Every
@@ -50,44 +50,50 @@ per-user systemd unit with lingering on Linux — and keeps accepted folders cur
 continuously. This is strictly better than the original "run a script overnight before
 you leave": there is no script to remember and no window to miss.
 
-**Gap.** The user cannot ask *"am I ready to leave?"*. There is no readiness signal, no
-last-synced summary, nothing that answers the one question that matters on the morning
-you pack. Continuous sync solves the forgetting; it does not solve the not-knowing.
+The question that matters on the morning you pack — *"am I ready to leave?"* — is
+answered by Syncthing's own page at `127.0.0.1:8384`: each folder shows its progress,
+and when every one reads **Up to Date**, you are good to go.
 
-*That may be so for some program that we have invented, but the SyncThing GUI shows us when the folders we have selected are up-to-date.*
-![Screenshot of folders partly updated](./images/Folders-partly-updated.jpg)
+![Syncthing's folder list, some folders still syncing](./images/Folders-partly-updated.jpg)
 
-*When all show "Up to Date", you are good to go. If we want people to use our program instead of the SyncThing GUI, yes, more work is needed. JimH44*
+**Gap.** Only that page answers it, and nothing sends the user there for that reason —
+neither the instructions site nor the installers mention it as the readiness check. If
+the depot ever puts its own program in front of Syncthing's page, that program has to
+answer the question too.
 
 ### G2 — You have the thing you didn't know you'd need
 
 The point of the depot is breadth carried cheaply, not a precise shopping list.
 
 **Today.** Every catalog folder is offered to every registered device, and accepting one
-brings its whole contents. Taking more than you think you need is the default posture.
+brings its whole contents. Both installers subscribe every device to `All_Contents_List`
+first; it holds `LangTechDepotFiles.txt`, which lists every folder on offer with its size
+and a short description (such as `Android_apps` — "Apps to install on an Android
+device"), then every file in it. The installer's folder picker is built from that file,
+so the user sees what each folder holds and how big it is before choosing, and can search
+the whole list for the thing they half-remember.
 
-**Gap.** Nothing makes the catalog legible *before* you need it. A folder announces
-itself with an ID and nothing else — no description of what is inside, no way to tell
-from the list whether the thing you half-remember hearing about is in there.
-
-*This Gap is no longer correct. All shares now have a brief description of the contents, such as "Apps to install on an Android device" as well as the short name, "Android_apps" in this case.*
-
-*And now The list of all files in the repository, `LangTechDepotFiles.txt`, is preinstalled along with SyncThing as part of the installation procedure, in the share `All_Contents_List`. JimH44*
+**Gap.** The picker starts with every new folder unticked, and an unticked folder is
+*ignored*, not merely skipped — so the default posture at step 4 is now to take less, not
+more. Re-running the installer brings ignored folders back, but the user has to know to.
+The descriptions also reach only the picker: a folder accepted straight from Syncthing's
+own page shows whatever label the server gives it.
 
 ### G3 — It lands where you want it, including a thumb drive
 
 The default is a folder on your computer, but the user should be able to point it
 somewhere else — most usefully at a removable drive they can carry or lend.
 
-*When we select folders using the SyncThing GUI, we do have the option of choosing where each folder goes, and what it is called. I think Gemini or Claude would be smart enough to add a browser window where we could let the user select the place to put what SyncThing delivers.JimH44*
+**Today.** On Windows, a fresh install opens a folder picker for where the depot should
+live — another drive or an external disk included — and saves the choice as Syncthing's
+default folder path, so later runs and Syncthing's own **Add** dialog both start from it.
+Syncthing's **Add** dialog also lets the user put any single folder elsewhere. On Linux
+the root is fixed at `$HOME/LangTechDepot`.
 
-**Today.** The destination is a fixed root: `%USERPROFILE%\LangTechDepot` on Windows,
-`$HOME/LangTechDepot` on Linux.
-
-**Gap.** Not configurable at all. Neither installer takes a path, and neither reads an
-override from the environment. The thumb-drive story exists only as a suggestion in
-README.md's *Sneakernet* section — run Syncthing portably from the drive itself — which
-nothing implements and no field user could follow.
+**Gap.** Linux has no choice at all. On Windows the choice is made once: a later run
+does not ask again, and Syncthing never moves a folder it has already created. The
+thumb-drive story — run Syncthing portably from the drive itself, so the depot travels
+with it — exists only as a suggestion in README.md's *Sneakernet* section.
 
 ### G4 — One installer, over the worst link there is
 
@@ -95,13 +101,15 @@ Some users rarely see a good connection. They need to fetch exactly one file, wi
 web page, images, advertisements or "helpful" extras riding along.
 
 **Today.** `depot.langtech.cloud/files` is a bare directory browse of the repository
-tree, served by Caddy. No page weight, no scripts, nothing to download but the file you came for.
+tree, served by Caddy. No page weight, no scripts, nothing to download but the file you
+came for.
 
-**Gap.** There is no manifest. The old system had a flat list of every filename you
-could search with Ctrl-F and then walk back up to the folder. Finding a known filename
-now means opening folders until you hit it.
+The manifest is back: `LangTechDepotFiles.txt` sits at the root of `/files`, a flat list
+of every file with its size and date, searchable with Ctrl-F, as the old system had it.
+It is regenerated on the server, not by anything in this repo.
 
-*No longer true. The file `LangTechDepotFiles.txt` is still at root in the file tree displayed at `depot.langtech.cloud/files`. JimH44*
+**Gap.** The manifest is itself about half a megabyte, which on the worst links is not
+free. Nothing yet offers a smaller way in.
 
 ### G5 — A centre mirrors once; everyone else pulls over the LAN
 
@@ -119,16 +127,19 @@ came from next door rather than from California.
 
 ### G6 — Picking what matches your kind of work is obvious
 
-Different work needs different software. The user should be able to see which folders are theirs without asking anyone.
+Different work needs different software. The user should be able to see which folders
+are theirs without asking anyone.
 
 **Today.** The catalog is organised by kind of work, and the user chooses at step 4 from
 the folders offered. `CATALOG_FOLDERS` can narrow what the server offers, globally.
 
-**Gap.** The folder list is the entire affordance. There is no per-user or per-role
-assignment and none is intended — a list that fails to explain itself has no fallback,
-because nothing else ever tells the user what a folder holds.
+The installer's picker shows every folder with a one-line description and its size, and
+the copy of `LangTechDepotFiles.txt` in `All_Contents_List` is arranged the same way —
+by kind of user rather than by kind of software — so the list explains itself.
 
-*The last clause above is no longer true. Every folder now comes with a terse description of its contents, and a folder called All_Contents_List is now shared and selected by all clients by default, which contains a version of LangTechDepotFiles.txt that is made from the LTSync perspective, ie. organised by kind of user. JimH44*
+**Gap.** The folder list is still the entire affordance. There is no per-user or per-role
+assignment and none is intended, so the one-line descriptions carry the whole job of
+telling a user which folders are theirs.
 
 > G2 and G6 pull against each other on purpose: **take more than you think you need**,
 > *and* **make the choice obvious**. Both land on the same surface — the list of folders
@@ -152,13 +163,12 @@ people," the design has failed.** Fix the screen the user is already looking at.
 A user who finds an open-source tool that other language-technology workers would
 benefit from should be able to say so.
 
-**Today.** Nothing. LTUse curates the folder contents; there is no path from a user back
-to them.
+**Today.** Nothing yet. LTUse curates the folder contents. The intended path back to them
+is `depot@langtech.cloud`, which LTUse will watch, advertised on the site — but the
+mailbox does not exist yet (see #15).
 
-*When the email address, perhaps depot@langtech.cloud, becomes usable, people will be able to make suggestions to that address, and I will notice. This could be advertised on the web pages. JimH44*
-
-**Gap.** Complete. Nothing on the site, in `register.py`, or in either installer accepts
-a suggestion. This is the only goal here with no implementation at all.
+**Gap.** Until it does, nothing on the site, in `register.py`, or in either installer
+accepts a suggestion. This is the only goal here with no implementation at all.
 
 ## What follows from this
 
@@ -181,8 +191,10 @@ merely obeyed.
   a field user, no "see the instructions" that is not already on the screen in front of
   them. (G7)
 - **Folder IDs are what users read.** They are permanent and must be legible to a
-  non-technical person scanning a list. Renaming a published one breaks every
-  `langtechdepot-subscribe` invocation and every user's mental map. (G2, G6) *Folders now come with short descriptions as well. JimH44*
+  non-technical person scanning a list, even with a description beside each one.
+  Renaming a published one breaks every `modify-langtechdepot` and
+  `langtechdepot-subscribe` invocation, every device's ignore list, and every user's
+  mental map. (G2, G6)
 - **Keep `/files` a bare tree.** Do not put a catalog browser, search UI or landing page
   in front of it; that reintroduces exactly the page weight it exists to avoid. The right
   answer to G4's missing manifest is a plain text file, not an application. (G4)

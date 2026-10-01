@@ -16,15 +16,30 @@ California repository server and is not in here.
 
 ## How a device joins
 
-1. User fills the form at `PUBLIC_URL` → `register.py` mints a single-use token, emails it.
-2. The installer POSTs `{token, deviceID, deviceName}` to `/register`.
+1. User fills the form at `PUBLIC_URL` → `register.py` mints a single-use token, shows it
+   on the page, and emails it when SMTP is configured (it is not yet — see Traps).
+2. The installer POSTs `{token, deviceID, deviceName}` to `/register`. An installer re-run
+   on a machine the server already knows skips the token.
 3. The service adds the device to Syncthing, shares every catalog folder with it, burns the token.
 4. A 60-second `reconcile_loop` re-shares the catalog, so folders added later reach
    already-registered devices.
+5. The installer subscribes to `All_Contents_List`, waits for `LangTechDepotFiles.txt`
+   to arrive in it, and shows a picker built from that file. Ticked folders are added;
+   **unticked ones go into the server device's `ignoredFolders`**, so Syncthing stops
+   offering them. Re-running the installer (or `modify-langtechdepot add`) brings them back.
 
 Server folders are **Send Only**; clients are receive-only. Every catalog folder is offered
-to every registered device — the client's pending-folder list *is* the subscription catalog.
-Syncthing's introducer mode lets clients learn each other, so office LANs sync peer-to-peer.
+to every registered device. Syncthing's introducer mode lets clients learn each other, so
+office LANs sync peer-to-peer.
+
+**The catalog file is an interface.** `LangTechDepotFiles.txt` is generated on the server
+by a script outside this repo (LTUse's side), and both installers parse it. The folder
+section sits between a line containing `Folders available, with their sizes` and one
+containing `Individual files available`, one folder per line as
+`<size> <FolderID> "<description>"`. Change that shape and both pickers go blank. The
+description becomes the folder's *local* label on the client when it is added; it does
+not come from the server's Syncthing label. (PR #24 proposed server-side labels from a
+`labels.json`; this file made that a second source for the same words.)
 
 **Why a registration service at all:** a Syncthing device *name* is public — BEP's
 ClusterConfig carries it to every peer, and the introducer forwards it. An earlier design
@@ -51,6 +66,7 @@ server/  register.py                    registration service + admin CLI (stdlib
          token_backup.sh                nightly sqlite .backup, 30-day retention
          SETUP.md                       server standup guide (the real deployment doc)
          langtechdepot-register.service · register.env.example · Caddyfile.example
+images/                                 screenshots for intent.md (never served to field users)
 .github/workflows/pages.yml            builds the .bat and the zip, publishes docs/ to Pages
 ```
 
@@ -164,8 +180,17 @@ only stops the reconciler from re-adding it.
   `ltd-sync-admin` wrapper. Same underlying command.
 - **GitHub Pages needs one manual setting**: Settings → Pages → Source → *GitHub
   Actions*. Without it the workflow runs green and publishes nothing.
-- The token is now **shown on the confirmation page as well as emailed**. A field user
-  on a slow link who has to go and find a mail client mid-install is one who does not
-  finish; the mail copy is the backup, not the delivery.
+- The token is **shown on the confirmation page**, and is meant to be emailed as well. A
+  field user on a slow link who has to go and find a mail client mid-install is one who
+  does not finish, so the page is the delivery and the mail the backup. **But no mail goes
+  out today**: `SMTP_HOST` is empty on the server, so the page is the *only* copy, and
+  `ltd-sync-admin approve` can notify nobody. The sender is to be
+  `depot@langtech.cloud` (already in `register.env.example`), a Zoho mailbox that does not
+  exist yet — see #15 and the comments on #24. `docs/help.html` still says "reply to the
+  email your token arrived in"; fix that line, `MAIL_FROM` and the SMTP settings together
+  once the mailbox is live.
+- **The Linux picker needs `yad`**, and the installer does not check for it. Without it
+  the dialog fails, and the script reports "Operation cancelled." and exits 0 — after
+  registering, with nothing subscribed but `All_Contents_List`.
 - The project was renamed twice — LangTran → LangTechDepot, and the `-sync` suffix dropped.
   Stale `langtran` strings may still surface in older docs and external references.

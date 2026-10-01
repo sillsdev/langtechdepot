@@ -69,13 +69,25 @@
   it from the quarantine list, or ask whoever manages the machine to allow the
   folder. Tell us if this happens &mdash; it is worth knowing which product.</p>
 
-  <h2>No folders are being offered to me</h2>
-  <p>Give it two or three minutes; the offers do not appear instantly. Then, in
-  the Syncthing page at <code>127.0.0.1:8384</code>, look at <strong>Remote
+  <h2>The list of folders never appears</h2>
+  <p>The installer waits for the list to arrive from the depot before it can
+  show it, so give it two or three minutes. If it still does not come, open
+  the Syncthing page at <code>127.0.0.1:8384</code> and look at <strong>Remote
   Devices</strong> on the right. If the depot is listed but disconnected, this
   machine cannot reach the server &mdash; usually a firewall or a captive
   portal. If it is not listed at all, registration did not complete: run the
   installer again with a fresh token.</p>
+  <p>On Linux, if the terminal says <strong>Operation cancelled</strong>
+  without your having cancelled anything, the folder window could not open:
+  the machine needs <code>yad</code>. Whoever looks after the machine can add
+  it (on Ubuntu, Debian or Mint, <code>sudo apt install yad</code>); then
+  paste the command again. You will not need a new token.</p>
+
+  <h2>I left a folder unticked and want it now</h2>
+  <p>On Windows, run the installer again and click <strong>Also display
+  ignored folders</strong>; tick it and click <strong>Apply</strong>. On
+  Linux the installer does not show set-aside folders again yet &mdash; ask a
+  person, below.</p>
 
   <h2>I deleted a file by accident</h2>
   <p>Nothing is lost, and nothing propagates. Your folders are
