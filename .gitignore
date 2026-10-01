@@ -14,6 +14,7 @@ docs/_preview/
 */.install*.sh
 */.Install*.bat
 */.setup*.bat
+*/.DS_Store
 
 # Built from setup-langtechdepot.bat.in + setup-langtechdepot.ps1 by
 # client/build-bat.sh (locally, and by the Pages workflow). Never committed:
