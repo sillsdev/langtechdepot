@@ -57,6 +57,7 @@ docs/    index.html                     the instructions site: which computer?
 client/  setup-langtechdepot.ps1        Windows installer - the one copy; edit this
          setup-langtechdepot.bat.in     CMD launcher the .ps1 is wrapped in (owns the pause)
          build-bat.sh                   .bat.in + .ps1 -> setup-langtechdepot.bat (gitignored)
+         version.sh                     the version, from the latest v* git tag
          install-langtechdepot.sh       Linux installer
          langtechdepot-subscribe.sh     CLI catalog list / subscribe (Linux only)
          START-HERE.txt                 rides along inside the Windows zip
@@ -97,6 +98,36 @@ The Caddyfile carries the switch-over recipe.
 token — filling the form in is what mints one. `/signup` is a second address for that
 same form, reserved for after the merge; until then the site must link to `/`, because
 that is the only path the deployed service answers on.
+
+## Versions and releases
+
+The version number lives in **one place: the git release tag** (`v1.0.1`). Nothing in
+the repo holds it. `client/version.sh` reads it; `build-bat.sh` writes it into the one
+line `$LTD_VERSION = "dev"` of the built `.bat` (the `.ps1` itself always says `dev`),
+and the Pages workflow puts it on the download page (`<!--LTD_VERSION-->` placeholder
+in `windows.html`). Users see it in the installer's first line, the folder list's
+title, `READ-ME.txt`, and `modify-langtechdepot version`.
+
+If `client/` has changed since the last tag, the label is `1.0.1+dev.<commit>` — a
+visible sign that a release was published without being tagged. Website-only changes
+keep the plain label, since the installer offered is unchanged.
+
+Numbering is major.minor.patch, each part a plain integer (1.9.0 is followed by 1.10.0):
+- **patch** — fixes only; nothing new to learn (config.xml repair, wording).
+- **minor** — something new, and existing installs keep working (`modify-langtechdepot`,
+  the folder shortcuts).
+- **major** — users or helpers must act, or old installs stop working properly
+  (registration changes, install location moves, folder ID changes, dropping an OS).
+
+To release, once the change is tested:
+
+```bash
+git tag -a v1.0.2 -m "Version 1.0.2: what changed"
+git push --follow-tags        # sends the commit and the tag together
+```
+
+The workflow also runs on a `v*` tag push, so tagging a commit that is already pushed
+relabels the download. It checks out with `fetch-depth: 0`; a shallow clone has no tags.
 
 ## Commands
 
@@ -152,6 +183,18 @@ only stops the reconciler from re-adding it.
   Raw-text edits go through `[IO.File]::ReadAllText/WriteAllText` with UTF-8, not
   `Get-Content`/`Set-Content`. (The installer still carries a clean-up for configs the
   old helper damaged; see "CLEAN-UP FOR CONFIGS DAMAGED BY EARLIER VERSIONS".)
+- **The programs are hidden; the content folder is not.** `syncthing.exe`,
+  `modify-langtechdepot.bat` and the config stay in `%LOCALAPPDATA%` (hidden, standard
+  for per-user programs, and where antivirus has passed them). The synced folders'
+  root (`$DATA_ROOT`, default `%USERPROFILE%\LangTechDepot`) is what users see: the
+  installer writes `READ-ME.txt`, `Change my folders.lnk` and an `Am I up-to-date, and
+  advanced management.url` there on every run, and pins it to Explorer's Quick access
+  once. Not Downloads (gets cleaned out, and a startup program there looks like
+  malware), not Documents/Desktop (often OneDrive-synced, so gigabytes would upload).
+- **People are told `localhost:8384`; the script uses `127.0.0.1:8384`.** Syncthing
+  is bound to 127.0.0.1; "localhost" may resolve to `::1` first. Browsers fall back,
+  `Invoke-RestMethod` callers shouldn't have to. `$GUI_PAGE` is for messages and
+  shortcuts, `$GUI_URL` for API calls.
 - Installers are idempotent and re-runnable.
 - **Quote every attribute in the inline SVG.** `stroke-width=2/>` parses as
   `stroke-width="2/"`, the tag never closes, and every following shape becomes an

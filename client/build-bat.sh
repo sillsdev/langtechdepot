@@ -9,6 +9,9 @@
 #
 #   sh client/build-bat.sh              -> client/setup-langtechdepot.bat
 #   sh client/build-bat.sh OUTPUT.bat   -> wherever you say
+#
+# The version number written into the .bat comes from the git tag; see
+# version.sh.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -37,5 +40,23 @@ if tr -d '\r' < "$payload" | grep -qxF "$marker"; then
     exit 1
 fi
 
-cat "$head" "$payload" > "$out"
-echo "built $out"
+# The version comes from the git release tag (see version.sh) and is written
+# into the one line of the payload that holds it. The .ps1 itself is never
+# changed: run straight from the repo it says "dev".
+version=$(sh "$here/version.sh")
+line='$LTD_VERSION = "dev"'
+count=$(tr -d '\r' < "$payload" | grep -cxF "$line" || true)
+if [ "$count" != 1 ]; then
+    echo "build-bat: $payload must contain the line $line exactly once (found $count)" >&2
+    exit 1
+fi
+
+{
+    cat "$head"
+    # Lines keep their CRLF: awk's record still ends in \r, and print adds \n.
+    awk -v v="$version" '{
+        if ($0 == "$LTD_VERSION = \"dev\"\r") print "$LTD_VERSION = \"" v "\"\r"
+        else print
+    }' "$payload"
+} > "$out"
+echo "built $out (version $version)"

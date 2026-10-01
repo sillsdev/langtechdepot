@@ -131,7 +131,7 @@ bash client/install-langtechdepot.sh
 
 No admin rights on either platform. The installer sets Syncthing to start
 automatically, registers the machine, and opens the web GUI at
-<http://127.0.0.1:8384>. Files land under `~/LangTechDepot/` (or
+<http://localhost:8384>. Files land under `~/LangTechDepot/` (or
 `%USERPROFILE%\LangTechDepot\`).
 
 For anyone who prefers the command line: on Windows the installer also installs
@@ -176,6 +176,7 @@ docs/    index.html                  the instructions site: which computer?
 client/  setup-langtechdepot.ps1     field installer (Windows) - edit this
          setup-langtechdepot.bat.in  launcher that the .ps1 is wrapped in
          build-bat.sh                builds setup-langtechdepot.bat from those two
+         version.sh                  the version number, from the latest v* git tag
          START-HERE.txt              rides along in the Windows zip
          install-langtechdepot.sh    field installer (Linux)
          langtechdepot-subscribe.sh  CLI catalog list / subscribe (Linux; Windows

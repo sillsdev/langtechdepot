@@ -84,7 +84,7 @@
       </svg>
     </div>
     <a class="btn big" href="downloads/langtechdepot-windows.zip" download>Download for Windows</a>
-    <span class="sub-btn">langtechdepot-windows.zip &middot; about 12&nbsp;KB</span>
+    <span class="sub-btn">langtechdepot-windows.zip &middot; version <!--LTD_VERSION-->dev<!--/LTD_VERSION--> &middot; about 20&nbsp;KB</span>
     <div class="note">
       <strong>No need to unzip it.</strong> Double-click the downloaded file
       and a window opens showing two files: the installer,
@@ -144,11 +144,15 @@
   <section class="step">
     <div class="num">4</div>
     <h3>Pick the folders you want</h3>
-    <p>First the installer asks where to keep the files. <code>C:\Users\you\LangTechDepot</code>
-    is fine; another drive or an external disk works too. Then, within a minute
-    or two, a window lists every folder on offer, with its size and a line
-    saying what is in it. Tick the ones you want and click
-    <strong>Apply</strong>.</p>
+    <p>First the installer asks where your LangTechDepot folder should go.
+    Click <strong>OK</strong> for the suggested place,
+    <code>C:\Users\you\LangTechDepot</code>, or pick another drive, such as
+    an external disk or a USB disk you carry.</p>
+    <p>Then, within a minute or two, a window lists every folder on offer,
+    with its size and a line saying what is in it. Tick the ones you want and
+    click <strong>Apply</strong>. With the keyboard: <strong>&darr;</strong>
+    and <strong>&uarr;</strong> move through the list, <strong>Space</strong>
+    ticks or unticks, and <strong>Enter</strong> applies.</p>
     <div class="art">
       <svg viewBox="0 0 320 132" width="320" role="img" aria-label="The installer's folder list: a tick box, size, folder ID and description on each row, Win_everything_en ticked, French_win not, and an Apply button">
         <rect x="2" y="6" width="316" height="120" rx="8" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
@@ -172,8 +176,9 @@
     </div>
     <div class="note">
       <strong>Anything left unticked is set aside</strong>, and Syncthing stops
-      offering it. That is not permanent: run the installer again whenever you like and it
-      shows you the list again, with <strong>Also display ignored folders</strong>
+      offering it. That is not permanent: double-click <strong>Change my folders</strong>
+      in your LangTechDepot folder (or run the installer again) and the list
+      comes back, with <strong>Also display ignored folders</strong>
       to bring back anything you passed over.
     </div>
     <div class="note">
@@ -185,12 +190,24 @@
     <div class="note">
       <strong>Seeing only a few?</strong> The library is still being moved onto
       this system a folder at a time, so not all of it is on offer yet. You do
-      not need to register again &mdash; when more have arrived, run the
-      installer again and the new ones will be in the list.
+      not need to register again &mdash; when more have arrived, double-click
+      <strong>Change my folders</strong> and the new ones will be in the list.
     </div>
     <p>That is the whole setup. Syncthing starts with your computer from now on
     and keeps those folders current by itself. The folders only ever receive
     &mdash; nothing on your machine is sent anywhere.</p>
+    <p>Your LangTechDepot folder is listed under <strong>Quick access</strong>
+    in File Explorer. Beside the folders you chose, it holds:</p>
+    <ul>
+      <li><strong>Change my folders</strong> &mdash; opens the list again, to
+      add folders, take back ones you ignored, or stop ones you no longer
+      need.</li>
+      <li><strong>Am I up-to-date, and advanced management</strong> &mdash;
+      opens the Syncthing page, <code>localhost:8384</code>, in your browser.
+      When every folder there says <strong>Up to Date</strong>, you have
+      everything. Check it before you travel.</li>
+      <li><strong>READ-ME.txt</strong> &mdash; all of this, for later.</li>
+    </ul>
   </section>
 
   <div class="note">

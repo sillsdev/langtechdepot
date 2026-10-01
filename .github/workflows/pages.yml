@@ -13,6 +13,10 @@ name: Publish the instructions site
 on:
   push:
     branches: [main]
+    # A release tag (v1.0.1, ...) rebuilds too, so tagging a commit that is
+    # already pushed relabels the download. (Path filters do not apply to tag
+    # pushes.)
+    tags: ['v*']
     paths:
       - 'docs/**'
       - 'client/**'
@@ -34,12 +38,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history and tags: the version number is the latest release
+          # tag (client/version.sh), and a shallow clone has none.
+          fetch-depth: 0
 
       - name: Assemble the site
         run: |
           set -eu
           mkdir -p _site/downloads
           cp -r docs/. _site/
+          # The version, from the release tag, onto the download page. The
+          # page carries a marked placeholder; refuse to publish without it.
+          version=$(sh client/version.sh)
+          echo "Version: $version"
+          grep -q '<!--LTD_VERSION-->' _site/windows.html \
+            || { echo "windows.html has lost its <!--LTD_VERSION--> placeholder"; exit 1; }
+          sed -i "s|<!--LTD_VERSION-->[^<]*<!--/LTD_VERSION-->|$version|" _site/windows.html
           # Windows: setup-langtechdepot.bat is built here from the launcher
           # header plus setup-langtechdepot.ps1, which it extracts and runs at
           # install time, so the .ps1 is the only copy anyone edits. It ships

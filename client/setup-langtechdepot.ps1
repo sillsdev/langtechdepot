@@ -34,6 +34,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# The version, e.g. 1.0.1. The number lives only in the git release tag
+# (v1.0.1): build-bat.sh asks client/version.sh for it and writes it into
+# this exact line of the built .bat, so keep the line exactly in this form.
+# Run straight from the repo, the script honestly says "dev".
+$LTD_VERSION = "dev"
+
 # Central exit point so -NoPause (passed by setup-langtechdepot.bat, which
 # already pauses itself) is honored everywhere the script can stop, instead of
 # only at the very end.
@@ -67,12 +73,18 @@ function Show-Usage {
     Write-Host "  $ScriptName add <FolderID> [<FolderID> ...]     subscribe to folders"
     Write-Host "  $ScriptName ignore <FolderID> [<FolderID> ...]  stop syncing folders, and ignore them"
     Write-Host "  $ScriptName list                                show every folder and its state"
+    Write-Host "  $ScriptName version                             which version this is"
     Write-Host "  $ScriptName                                     choose folders in a window"
 }
 
 if ($CliMode) {
     if ($Action -in @("help", "/?", "/h")) {
+        Write-Host "LangTechDepot $LTD_VERSION"
         Show-Usage
+        Exit-Script -Code 0
+    }
+    if ($Action -eq "version") {
+        Write-Host "LangTechDepot $LTD_VERSION"
         Exit-Script -Code 0
     }
     if ($Action -notin @("add", "ignore", "list")) {
@@ -91,8 +103,12 @@ if ($CliMode) {
         Exit-Script -Code 2
     }
 } elseif ($ScriptName -eq "modify-langtechdepot") {
+    Write-Host "LangTechDepot $LTD_VERSION"
     Write-Host "modify-langtechdepot: You didn't specify any changes. Please respond to the dialog appearing soon:"
     Write-Host "(For the command-line way, type: modify-langtechdepot help)"
+    Write-Host ""
+} else {
+    Write-Host "LangTechDepot installer $LTD_VERSION"
     Write-Host ""
 }
 
@@ -308,6 +324,12 @@ if (-not (Get-Process -Name "syncthing" -ErrorAction SilentlyContinue)) {
 $API_KEY = Get-XmlNodeText -path $configFile -xpath "//configuration/gui/apikey"
 $GUI_ADDR = "127.0.0.1:8384"
 $GUI_URL = "http://$GUI_ADDR"
+# The same page, as people are told about it. "localhost" reads as "this
+# computer" to someone who is not a network engineer. Syncthing itself stays
+# bound to 127.0.0.1 and this script talks to it there: "localhost" can mean
+# the IPv6 address ::1 first, where nothing is listening. Browsers quietly
+# fall back to 127.0.0.1, so the friendly name works for people.
+$GUI_PAGE = "http://localhost:8384"
 $SERVER_NAME = "LangTechDepot Server"
 
 function Invoke-SyncthingApi {
@@ -483,6 +505,12 @@ if ($Self -and (Test-Path $Self)) {
 }
 if (Test-Path $ModifyBat) { Add-ToUserPath -Dir $BIN_DIR }
 
+# Which version last ran here, so a later version can tell what it is
+# upgrading from if that ever matters.
+try {
+    Set-Content -Path (Join-Path $CONFIG_DIR "installed-version.txt") -Value $LTD_VERSION
+} catch {}
+
 # -----------------------------------------------------------------------------
 # Where LangTechDepot's synced files live
 # -----------------------------------------------------------------------------
@@ -504,14 +532,18 @@ Add-Type -AssemblyName System.Drawing
 if ($isFreshInstall) {
     $defaultRoot = "$HOME\LangTechDepot"
 
+    # The chooser opens on the LangTechDepot folder itself, so just clicking
+    # OK takes the default. It has to exist to be preselected; if something
+    # else is chosen, the empty one is tidied away again below. (Opening on
+    # $HOME instead, as this once did, meant a plain OK scattered everything
+    # loose in the user's home folder.)
+    $madeDefault = -not (Test-Path $defaultRoot)
+    New-Item -ItemType Directory -Force -Path $defaultRoot | Out-Null
+
     $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $folderDialog.Description = "Choose where to store your LangTechDepot files. Use 'Make New Folder' to create a new one."
+    $folderDialog.Description = "Where should your LangTechDepot folder go? Click OK for the suggested place, or pick another drive, such as a USB disk. A folder called LangTechDepot is made there."
     $folderDialog.ShowNewFolderButton = $true
-    if (Test-Path $defaultRoot) {
-        $folderDialog.SelectedPath = $defaultRoot
-    } else {
-        $folderDialog.SelectedPath = $HOME
-    }
+    $folderDialog.SelectedPath = $defaultRoot
 
     # FolderBrowserDialog has no TopMost property of its own (it's a Win32
     # wrapper, not a Form) and no owner window, so - same problem as the
@@ -533,9 +565,18 @@ if ($isFreshInstall) {
 
     if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $folderDialog.SelectedPath) {
         $DATA_ROOT = $folderDialog.SelectedPath
+        # Whatever was picked - a drive, a USB disk, Documents - the files go
+        # in a folder called LangTechDepot there, never loose in it.
+        if ((Split-Path $DATA_ROOT -Leaf) -ne "LangTechDepot") {
+            $DATA_ROOT = [System.IO.Path]::Combine($DATA_ROOT, "LangTechDepot")
+        }
     } else {
         $DATA_ROOT = $defaultRoot
         Write-Host "No folder chosen - using the default location: $DATA_ROOT"
+    }
+    if ($madeDefault -and ($DATA_ROOT -ne $defaultRoot) -and
+        -not (Get-ChildItem -Path $defaultRoot -Force -ErrorAction SilentlyContinue)) {
+        Remove-Item -Path $defaultRoot -ErrorAction SilentlyContinue
     }
 } else {
     $DATA_ROOT = (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/defaults/folder").path
@@ -550,6 +591,104 @@ Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/defaults/folder" -Bo
     type = "receiveonly"
     path = $DATA_ROOT
 } | Out-Null
+
+# -----------------------------------------------------------------------------
+# Make the LangTechDepot folder easy to find and use
+# -----------------------------------------------------------------------------
+# The programs live out of sight in AppData; this folder is the part people
+# use. So it gets, beside the synced folders:
+#   READ-ME.txt                                what this is and what to do
+#   Change my folders.lnk                      modify-langtechdepot: the dialog
+#   Am I up-to-date, and advanced management   the Syncthing page in a browser
+# and is pinned to File Explorer's Quick access. All three files are
+# rewritten on every run, so they stay current and come back if deleted. The
+# pin is done once only (a marker file in $CONFIG_DIR remembers it), so
+# someone who unpins it is not overruled on the next run. None of this is
+# fatal.
+$ChangeLink  = Join-Path $DATA_ROOT "Change my folders.lnk"
+$GuiLink     = Join-Path $DATA_ROOT "Am I up-to-date, and advanced management.url"
+$ReadMe      = Join-Path $DATA_ROOT "READ-ME.txt"
+$PinnedMark  = Join-Path $CONFIG_DIR "pinned-to-quick-access.txt"
+
+try {
+    $readMeText = @"
+LangTechDepot
+=============
+(Set up by LangTechDepot version $LTD_VERSION.)
+
+This folder holds the LangTechDepot folders you chose, such as
+Android_apps or Keyman. Each one is kept up to date from the LangTechDepot
+server, automatically, whenever this computer is on the internet.
+
+Please don't change or delete files inside those folders: they are a copy
+of what is on the server. To change an installer, copy it somewhere else
+first.
+
+In this folder:
+
+  Change my folders
+      Add folders, take back ones you ignored, or stop ones you no longer
+      need. Opens the same list of folders you saw when you installed.
+
+  Am I up-to-date, and advanced management
+      Opens the Syncthing page ($GUI_PAGE) in your web browser.
+      When every folder there says "Up to Date", you have everything -
+      check this before you travel.
+
+  All_Contents_List\LangTechDepotFiles.txt
+      Every file available in the depot, and the size of each folder.
+
+For Command Prompt users:
+  modify-langtechdepot list                 every folder and its state
+  modify-langtechdepot add <FolderID>       subscribe to a folder
+  modify-langtechdepot ignore <FolderID>    stop syncing a folder
+
+Help: $HELP_URL
+"@
+    # Notepad on older Windows 10 shows LF-only text as one long line.
+    $readMeText = ($readMeText -replace "`r?`n", "`r`n") + "`r`n"
+    [System.IO.File]::WriteAllText($ReadMe, $readMeText, (New-Object System.Text.UTF8Encoding($false)))
+} catch {
+    Write-Host "Note: could not write $ReadMe : $_"
+}
+
+try {
+    # An Internet shortcut: double-clicking it opens the default browser.
+    $urlText = "[InternetShortcut]`r`nURL=$GUI_PAGE/`r`n"
+    [System.IO.File]::WriteAllText($GuiLink, $urlText, [System.Text.Encoding]::ASCII)
+} catch {
+    Write-Host "Note: could not create the shortcut to the Syncthing page: $_"
+}
+
+if (Test-Path $ModifyBat) {
+    try {
+        $wsh = New-Object -ComObject WScript.Shell
+        $lnk = $wsh.CreateShortcut($ChangeLink)
+        $lnk.TargetPath       = $ModifyBat
+        $lnk.WorkingDirectory = $BIN_DIR
+        $lnk.Description      = "Choose which LangTechDepot folders this computer keeps"
+        $lnk.Save()
+    } catch {
+        Write-Host "Note: could not create the 'Change my folders' shortcut: $_"
+    }
+}
+
+if (-not (Test-Path $PinnedMark)) {
+    try {
+        $shell = New-Object -ComObject Shell.Application
+        # Quick access, as a shell namespace. Skip the pin if the folder is
+        # already listed there, so this never toggles an existing pin off.
+        $quick = $shell.Namespace("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}")
+        $listed = $false
+        if ($quick) {
+            foreach ($it in $quick.Items()) { if ($it.Path -eq $DATA_ROOT) { $listed = $true } }
+        }
+        if (-not $listed) { $shell.Namespace($DATA_ROOT).Self.InvokeVerb("pintohome") }
+        Set-Content -Path $PinnedMark -Value "Pinned $DATA_ROOT to Quick access on $(Get-Date -Format s)"
+    } catch {
+        Write-Host "Note: could not pin $DATA_ROOT in File Explorer: $_"
+    }
+}
 
 # -----------------------------------------------------------------------------
 # AUTO-SUBSCRIBE: All_Contents_List
@@ -597,7 +736,7 @@ while (-not (Test-Path $CATALOG_FILE) -or (Get-Item $CATALOG_FILE).Length -eq 0)
         Write-Host ""
         Write-Warning "Still waiting for the folder catalog after $catalogTimeoutSeconds seconds."
         Write-Host "Syncthing is running, but hasn't finished syncing $AUTO_FOLDER_ID from the server yet."
-        Write-Host "Open $GUI_URL and check the Folders list and any red or yellow notices there."
+        Write-Host "Open $GUI_PAGE and check the Folders list and any red or yellow notices there."
         Write-Host "Syncthing will keep running in the background - once $AUTO_FOLDER_ID shows"
         Write-Host "'Up to Date' there, just run this installer again to pick your folders."
         Exit-Script -Code 1
@@ -725,7 +864,7 @@ function Show-FolderSelectionForm {
 
     # Build UI Window
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "LangTechDepot - Available Folders"
+    $form.Text = "LangTechDepot $LTD_VERSION - Available Folders    (Space ticks, Enter applies, Esc cancels)"
     $form.Size = [System.Drawing.Size]::new(800, 520)
     # Wide enough that the left-hand buttons never slide under Apply/Cancel,
     # which are anchored to the right edge.
@@ -881,11 +1020,39 @@ function Show-FolderSelectionForm {
     $form.AcceptButton = $btnApply
     $form.CancelButton = $btnCancel
 
+    # Keyboard: Up/Down move between folders and Space ticks or unticks one.
+    # Left alone, the grid takes Enter for itself (it just moves down a row)
+    # and Esc only undoes the last tick, so neither ever reaches the form's
+    # Apply/Cancel buttons. Marking them as the grid's own input keys sends
+    # them to its KeyDown, where they do what the buttons say. EndEdit first,
+    # so a tick made with Space just before Enter is not lost.
+    $grid.Add_PreviewKeyDown({
+        param($s, $e)
+        if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Enter -or
+            $e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $e.IsInputKey = $true }
+    })
+    $grid.Add_KeyDown({
+        param($s, $e)
+        if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+            $e.Handled = $true
+            $e.SuppressKeyPress = $true
+            $grid.EndEdit() | Out-Null
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        } elseif ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+            $e.Handled = $true
+            $e.SuppressKeyPress = $true
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        }
+    })
+
     $dialogResult = $form.ShowDialog()
 
     if ($dialogResult -ne [System.Windows.Forms.DialogResult]::OK) {
         return $null
     }
+
+    # A tick still being edited (made with Space, say) counts too.
+    $grid.EndEdit() | Out-Null
 
     # Extract chosen selections. Ignored folders that were never displayed
     # are not returned, so they are left exactly as they are.
@@ -1130,22 +1297,29 @@ if ($CliMode) {
         Write-Host "${ScriptName}: $Failures change(s) failed - see above."
         Exit-Script -Code 1
     }
-    Write-Host "Done. Progress is on the Syncthing page at $GUI_URL"
+    Write-Host "Done. Progress is on the Syncthing page at $GUI_PAGE"
     Exit-Script -Code 0
 }
 
 Write-Host " "
-Write-Host "To add more folders later, or take back one you ignored,"
-Write-Host "just run this installer again. In the folder list, click"
-Write-Host "'Also display ignored folders' to see the ones you ignored."
+Write-Host "Your LangTechDepot folder is $DATA_ROOT"
+Write-Host "(File Explorer lists it under Quick access). In it:"
+if (Test-Path $ModifyBat) {
+    Write-Host "  'Change my folders' - add folders, or take back ones you ignored"
+    Write-Host "     (click 'Also display ignored folders' in the list to see them)."
+} else {
+    Write-Host "  To add folders later, or take back ones you ignored, run this"
+    Write-Host "  installer again."
+}
+Write-Host "  'Am I up-to-date, and advanced management' - opens the Syncthing"
+Write-Host "     page, $GUI_PAGE, where each folder says when it is Up to Date."
+Write-Host "  READ-ME.txt - all of this, for later."
 if (Test-Path $ModifyBat) {
     Write-Host " "
-    Write-Host "Or, in a Command Prompt opened from now on, type for example:"
+    Write-Host "In a Command Prompt opened from now on, you can also type, for example:"
     Write-Host "    modify-langtechdepot list"
     Write-Host "    modify-langtechdepot add Android_apps"
     Write-Host "    modify-langtechdepot ignore Android_apps"
 }
-Write-Host " "
-Write-Host "If you ever need to manage Syncthing directly, open $GUI_URL."
 
 Exit-Script -Code 0
