@@ -18,9 +18,10 @@ gets today, and what that rules out. Read it before changing anything a user
 touches.
 
 How it works: the repository server in California marks every catalog folder
-**Send Only** and offers all of them to each registered device. The client's
-pending-folder list *is* the subscription catalog. Accepted folders stay
-current automatically, and devices holding the same folders sync from each
+**Send Only** and offers all of them to each registered device. The installer
+subscribes to `All_Contents_List`, whose `LangTechDepotFiles.txt` lists every
+folder with its size and a description, and shows that list as checkboxes;
+unticked folders are ignored. Accepted folders stay current automatically, and devices holding the same folders sync from each
 other, so machines on one office LAN pull from their neighbour instead of from
 California — the old btsync swarm, without the licensing.
 
@@ -34,7 +35,7 @@ designed as one flow rather than two projects:
 | 1 | Fills the form, gets a token | `depot.langtech.cloud` — [server/register.py](server/register.py) |
 | 2 | Downloads the installer | the instructions site — [docs/](docs/) |
 | 3 | Runs it, pastes the token | the installer — [client/](client/) |
-| 4 | Clicks **Add** on the folders they want | Syncthing's own GUI |
+| 4 | Ticks the folders they want | the installer's folder list |
 
 The token page hands back to the platform page the user came from (the `?os=`
 parameter rides through the form), and the step rail, palette and components

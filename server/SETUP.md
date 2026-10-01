@@ -85,6 +85,15 @@ Folders added *after* people register are picked up automatically: the
 registration service re-shares the catalog with every active device once a
 minute.
 
+**`All_Contents_List` must be one of them** (and in `CATALOG_FOLDERS`, if that
+is set). Both installers subscribe to it first and build their folder list
+from the `LangTechDepotFiles.txt` inside it; without it the Linux installer
+waits forever and the Windows one gives up and sends the user to Syncthing's page.
+A folder that is missing from that file's *Folders available, with their
+sizes* section never appears in the installers' list at all, however it is
+shared — so a new folder goes live for users when the file is regenerated, not
+when it is shared.
+
 ## 4. Install the registration service
 
 This is how field machines join. Nothing else admits a device.

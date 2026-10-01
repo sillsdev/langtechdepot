@@ -19,6 +19,22 @@ REGISTER_URL='https://depot.langtech.cloud'
 # it does not answer "it failed", and those are different people.
 HELP_URL='https://sillsdev.github.io/langtechdepot/help.html'
 
+# The folder picker is a yad window. Checked here, before anything is installed
+# or a token is spent: missing yad used to surface only at the picker, after
+# registration, as "Operation cancelled." and exit 0.
+if ! command -v yad >/dev/null 2>&1; then
+    cat >&2 <<EOF
+This computer is missing yad, which the installer needs to show the list of
+folders. Nothing has been installed and your token has not been used.
+
+Whoever looks after this computer can add it (on Ubuntu, Debian or Mint:
+sudo apt install yad). Then paste the same command again.
+
+Help: $HELP_URL
+EOF
+    exit 1
+fi
+
 DATA_ROOT="$HOME/LangTechDepot"
 BIN="$HOME/.local/bin/syncthing"
 
