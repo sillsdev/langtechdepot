@@ -16,7 +16,7 @@ DEV2 = "ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2"
 
 state = {"devices": [], "folders": [{"id": "software-core", "devices": []},
                                     {"id": "training-videos", "devices": []}],
-         "deleted": []}
+         "deleted": [], "patches": []}
 
 
 class Fake(BaseHTTPRequestHandler):
@@ -43,8 +43,12 @@ class Fake(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         m = re.match(r"^/rest/config/folders/(.+)$", self.path)
         if m:
+            # Syncthing merges the keys it is given; only child arrays are
+            # replaced wholesale. Applying the whole body is what makes type
+            # observable here.
+            state["patches"].append((m.group(1), body))
             for f in state["folders"]:
-                if f["id"] == m.group(1): f["devices"] = body["devices"]
+                if f["id"] == m.group(1): f.update(body)
             self._j(200, {})
         else: self._j(404, {})
 
@@ -158,6 +162,22 @@ os.environ.update({k: env[k] for k in ("SYNCTHING_URL", "SYNCTHING_API_KEY", "DB
 import register as reg  # noqa: E402
 reg.share_catalog_with({DEV})
 check("late-added folder gets shared", any(d["deviceID"] == DEV for d in state["folders"][-1]["devices"]))
+check("catalog folders are forced Send Only", all(f.get("type") == "sendonly" for f in state["folders"]))
+
+# Steady state must be free: the reconciler runs every 60s forever.
+before = len(state["patches"])
+reg.share_catalog_with({DEV})
+check("nothing to change means nothing is written", len(state["patches"]) == before,
+      f"{len(state['patches']) - before} write(s)")
+
+# Adding a device to a folder that is already Send Only must not resend the
+# type, so the journal never claims a flip that did not happen.
+before = len(state["patches"])
+reg.share_catalog_with({DEV, DEV2})
+sent = state["patches"][before:]
+check("adding a device to a Send Only folder sends only the device list",
+      sent and all(set(body) == {"devices"} for _, body in sent),
+      [sorted(body) for _, body in sent])
 
 # admin list
 out = subprocess.run([sys.executable, os.path.join(REPO, "register.py"), "admin", "list"],

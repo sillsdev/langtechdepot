@@ -169,34 +169,38 @@ def catalog_folder_ids() -> list[str]:
 
 
 def share_catalog_with(device_ids: set[str]) -> list[str]:
-    """Add device_ids to every catalog folder's device list. PATCH replaces
-    child arrays wholesale, so read-modify-write rather than append.
-    Also ensures folder type is strictly set to 'sendonly'."""
+    """Add device_ids to every catalog folder's device list, and make sure
+    each folder is Send Only. PATCH replaces child arrays wholesale, so the
+    device list is read-modify-write rather than append. Only the keys that
+    are actually wrong go into the payload, and the journal line says which,
+    so "flipped to sendonly" is never reported for a folder that already was."""
     touched = []
     for folder in st("GET", "/rest/config/folders") or []:
-        if CATALOG_FOLDERS and folder["id"] not in CATALOG_FOLDERS:
+        fid = folder["id"]
+        if CATALOG_FOLDERS and fid not in CATALOG_FOLDERS:
+            continue
+        touched.append(fid)
+
+        patch: dict = {}
+        changed: list[str] = []
+
+        missing = device_ids - {d["deviceID"] for d in folder.get("devices", [])}
+        if missing:
+            patch["devices"] = folder.get("devices", []) + [
+                {"deviceID": d} for d in sorted(missing)
+            ]
+            changed.append(f"shared with {len(missing)} more device(s)")
+
+        was = folder.get("type", "")
+        if was != "sendonly":
+            patch["type"] = "sendonly"
+            changed.append(f"type {was or 'unset'} -> sendonly")
+
+        if not patch:
             continue
 
-        have = {d["deviceID"] for d in folder.get("devices", [])}
-        missing = device_ids - have
-        current_type = folder.get("type", "")
-
-        # Trigger an update if there are missing devices OR if the type isn't sendonly
-        if not missing and current_type == "sendonly":
-            touched.append(folder["id"])
-            continue
-
-        new_devices = folder.get("devices", []) + [{"deviceID": d} for d in sorted(missing)]
-
-        # Build the PATCH payload incorporating both the updated devices and the type constraint
-        patch_payload = {
-            "devices": new_devices,
-            "type": "sendonly"
-        }
-
-        print(f"[reconcile] Flipped {folder['id']} to sendonly because it was {current_type}", flush=True)
-        st("PATCH", f"/rest/config/folders/{folder['id']}", patch_payload)
-        touched.append(folder["id"])
+        st("PATCH", f"/rest/config/folders/{fid}", patch)
+        print(f"[reconcile] {fid}: {', '.join(changed)}", flush=True)
     return touched
 
 
