@@ -25,6 +25,9 @@ unticked folders are ignored. Accepted folders stay current automatically, and d
 other, so machines on one office LAN pull from their neighbour instead of from
 California — the old btsync swarm, without the licensing.
 
+Folders are **receive-only** on the client: local edits and deletions are
+flagged and revertible, and nothing local propagates outward.
+
 ## The four-step journey
 
 A field user crosses between two sites during the install, and they are
@@ -123,6 +126,17 @@ plus the `.ps1`, by `client/build-bat.sh` — run it locally to get a `.bat` to
 test on Windows; the workflow runs the same script when it publishes. The built
 `.bat` is gitignored.
 
+For anyone who prefers the command line: on Windows the installer also installs
+itself as `modify-langtechdepot.bat`, on the user's PATH, so that these commands 
+are available in any new Command Prompt:
+
+```
+modify-langtechdepot list 
+modify-langtechdepot add <FolderID>...
+modify-langtechdepot ignore <FolderID>...
+```
+(with no arguments it is the installer again, dialog and all).
+
 **Linux**
 
 ```bash
@@ -134,15 +148,8 @@ automatically, registers the machine, and opens the web GUI at
 <http://localhost:8384>. Files land under `~/LangTechDepot/` (or
 `%USERPROFILE%\LangTechDepot\`).
 
-For anyone who prefers the command line: on Windows the installer also installs
-itself as `modify-langtechdepot.bat`, on the user's PATH, so that
-`modify-langtechdepot list`, `modify-langtechdepot add <FolderID>...` and
-`modify-langtechdepot ignore <FolderID>...` work from any new Command Prompt
-(with no arguments it is the installer again, dialog and all). On Linux,
+On Linux,
 `langtechdepot-subscribe.sh` lists the catalog and subscribes by folder ID.
-
-Folders are **receive-only** on the client: local edits and deletions are
-flagged and revertible, and nothing local propagates outward.
 
 ## Sneakernet
 
