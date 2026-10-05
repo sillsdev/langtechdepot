@@ -13,10 +13,11 @@ name: Publish the instructions site
 on:
   push:
     branches: [main]
-    # A release tag (v1.0.1, ...) rebuilds too, so tagging a commit that is
-    # already pushed relabels the download. (Path filters do not apply to tag
-    # pushes.)
-    tags: ['v*']
+    # No tag trigger: `git push --follow-tags` sends a release tag together
+    # with its commit, so this run already sees it. A separate tag run would
+    # cancel this one (see concurrency below) and is not allowed to deploy to
+    # the github-pages environment anyway. To relabel after tagging a commit
+    # already pushed, use "Run workflow" (workflow_dispatch).
     paths:
       - 'docs/**'
       - 'client/**'

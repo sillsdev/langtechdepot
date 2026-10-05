@@ -529,19 +529,51 @@ try {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-if ($isFreshInstall) {
-    $defaultRoot = "$HOME\LangTechDepot"
+# Two places, kept apart on purpose:
+#   $HOME_BASE   %USERPROFILE%\LangTechDepot - always here, pinned in Explorer.
+#                Holds READ-ME.txt, "Change my Assets", "Am I up-to-date..."
+#                and "Assets". It is the one place anyone is ever told to look.
+#   $DATA_ROOT   where Syncthing puts the synced folders (the Assets). By
+#                default $HOME_BASE\Assets, a real folder; if the user picks
+#                somewhere else (another drive, a USB disk, a NoBackup folder),
+#                "Assets" in $HOME_BASE is a shortcut to it instead.
+# So the instructions are the same for everyone, and on a machine whose
+# Assets live on a USB disk, the support items do not vanish when the disk
+# is unplugged.
+$HOME_BASE      = Join-Path $HOME "LangTechDepot"
+$DEFAULT_ASSETS = Join-Path $HOME_BASE "Assets"
 
-    # The chooser opens on the LangTechDepot folder itself, so just clicking
-    # OK takes the default. It has to exist to be preselected; if something
+function Test-SamePath {
+    param([string]$A, [string]$B)
+    if (-not $A -or -not $B) { return $false }
+    return ([System.IO.Path]::GetFullPath($A).TrimEnd('\') -ieq [System.IO.Path]::GetFullPath($B).TrimEnd('\'))
+}
+
+if ($isFreshInstall) {
+    $defaultRoot = $DEFAULT_ASSETS
+
+    # The chooser opens on the suggested Assets folder itself, so just
+    # clicking OK takes it. It has to exist to be preselected; if something
     # else is chosen, the empty one is tidied away again below. (Opening on
     # $HOME instead, as this once did, meant a plain OK scattered everything
     # loose in the user's home folder.)
     $madeDefault = -not (Test-Path $defaultRoot)
     New-Item -ItemType Directory -Force -Path $defaultRoot | Out-Null
 
+    # The dialog's own text area holds only about two short lines (and its
+    # size cannot be changed from Windows PowerShell), so the fuller
+    # explanation goes in the console just before it opens.
+    Write-Host ""
+    Write-Host "Next: where to keep your LangTechDepot Assets - the folders of files"
+    Write-Host "that come from the depot. Click OK for the suggested place:"
+    Write-Host "    $defaultRoot"
+    Write-Host "or pick another drive, such as a USB disk; a folder called"
+    Write-Host "LangTechDepot will be made there."
+    Write-Host ""
+    Start-Sleep -Seconds 5
+
     $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $folderDialog.Description = "Where should your LangTechDepot folder go? Click OK for the suggested place, or pick another drive, such as a USB disk. A folder called LangTechDepot is made there."
+    $folderDialog.Description = "Where should your LangTechDepot Assets be kept? Click OK for the suggested place."
     $folderDialog.ShowNewFolderButton = $true
     $folderDialog.SelectedPath = $defaultRoot
 
@@ -564,23 +596,30 @@ if ($isFreshInstall) {
     $ownerForm.Close()
 
     if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $folderDialog.SelectedPath) {
-        $DATA_ROOT = $folderDialog.SelectedPath
-        # Whatever was picked - a drive, a USB disk, Documents - the files go
-        # in a folder called LangTechDepot there, never loose in it.
-        if ((Split-Path $DATA_ROOT -Leaf) -ne "LangTechDepot") {
-            $DATA_ROOT = [System.IO.Path]::Combine($DATA_ROOT, "LangTechDepot")
+        $picked = $folderDialog.SelectedPath
+        if (Test-SamePath $picked $HOME_BASE) {
+            # The home folder itself: the Assets go in their usual place in it.
+            $DATA_ROOT = $DEFAULT_ASSETS
+        } elseif ((Split-Path $picked -Leaf) -in @("LangTechDepot", "Assets")) {
+            $DATA_ROOT = $picked
+        } else {
+            # Whatever else was picked - a drive, a USB disk, a NoBackup
+            # folder - the files go in a folder called LangTechDepot there,
+            # never loose in it. On a disk someone carries or lends, that
+            # name says what it is.
+            $DATA_ROOT = [System.IO.Path]::Combine($picked, "LangTechDepot")
         }
     } else {
         $DATA_ROOT = $defaultRoot
         Write-Host "No folder chosen - using the default location: $DATA_ROOT"
     }
-    if ($madeDefault -and ($DATA_ROOT -ne $defaultRoot) -and
+    if ($madeDefault -and -not (Test-SamePath $DATA_ROOT $defaultRoot) -and
         -not (Get-ChildItem -Path $defaultRoot -Force -ErrorAction SilentlyContinue)) {
         Remove-Item -Path $defaultRoot -ErrorAction SilentlyContinue
     }
 } else {
     $DATA_ROOT = (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/defaults/folder").path
-    if (-not $DATA_ROOT) { $DATA_ROOT = "$HOME\LangTechDepot" }
+    if (-not $DATA_ROOT) { $DATA_ROOT = $DEFAULT_ASSETS }
 }
 
 New-Item -ItemType Directory -Force -Path $DATA_ROOT | Out-Null
@@ -595,20 +634,86 @@ Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/defaults/folder" -Bo
 # -----------------------------------------------------------------------------
 # Make the LangTechDepot folder easy to find and use
 # -----------------------------------------------------------------------------
-# The programs live out of sight in AppData; this folder is the part people
-# use. So it gets, beside the synced folders:
+# The programs live out of sight in AppData; $HOME_BASE (see above) is the
+# part people use. It gets:
+#   Assets                                     the synced folders: a real folder,
+#                                              or a shortcut when they are elsewhere
 #   READ-ME.txt                                what this is and what to do
-#   Change my folders.lnk                      modify-langtechdepot: the dialog
+#   Change my Assets.lnk                       modify-langtechdepot: the dialog
 #   Am I up-to-date, and advanced management   the Syncthing page in a browser
-# and is pinned to File Explorer's Quick access. All three files are
-# rewritten on every run, so they stay current and come back if deleted. The
-# pin is done once only (a marker file in $CONFIG_DIR remembers it), so
-# someone who unpins it is not overruled on the next run. None of this is
-# fatal.
-$ChangeLink  = Join-Path $DATA_ROOT "Change my folders.lnk"
-$GuiLink     = Join-Path $DATA_ROOT "Am I up-to-date, and advanced management.url"
-$ReadMe      = Join-Path $DATA_ROOT "READ-ME.txt"
+# and is pinned to File Explorer's Quick access. The files are rewritten on
+# every run, so they stay current and come back if deleted. The pin is done
+# once only (a marker file in $CONFIG_DIR remembers it), so someone who unpins
+# it is not overruled on the next run. None of this is fatal.
+New-Item -ItemType Directory -Force -Path $HOME_BASE | Out-Null
+$ChangeLink  = Join-Path $HOME_BASE "Change my Assets.lnk"
+$GuiLink     = Join-Path $HOME_BASE "Am I up-to-date, and advanced management.url"
+$ReadMe      = Join-Path $HOME_BASE "READ-ME.txt"
+$AssetsLink  = Join-Path $HOME_BASE "Assets.lnk"
 $PinnedMark  = Join-Path $CONFIG_DIR "pinned-to-quick-access.txt"
+
+# Where the Assets are, relative to the home folder:
+#   in its Assets folder (the default), elsewhere (shortcut), or - on a
+#   machine set up before version 1.1 - directly in the home folder itself.
+$AssetsHere   = Test-SamePath $DATA_ROOT $DEFAULT_ASSETS
+$OldLayout    = Test-SamePath $DATA_ROOT $HOME_BASE
+$AssetsAway   = -not ($AssetsHere -or $OldLayout)
+
+# Tidy items earlier versions made: the shortcut's old name, and the three
+# support items that 1.0.x wrote beside the synced folders wherever they were.
+try {
+    $stale = @(Join-Path $HOME_BASE "Change my folders.lnk")
+    if (-not $OldLayout) {
+        foreach ($n in @("READ-ME.txt", "Change my folders.lnk", "Am I up-to-date, and advanced management.url")) {
+            $stale += (Join-Path $DATA_ROOT $n)
+        }
+    }
+    foreach ($f in $stale) { if (Test-Path -LiteralPath $f -PathType Leaf) { Remove-Item -LiteralPath $f } }
+} catch {
+    Write-Host "Note: could not tidy items left by an earlier version: $_"
+}
+
+# "Assets": a shortcut only when the Assets are kept somewhere else.
+try {
+    if ($AssetsAway) {
+        # An empty Assets folder (from the chooser's suggestion) would sit
+        # beside the shortcut under the same name; a non-empty one is left.
+        if ((Test-Path -LiteralPath $DEFAULT_ASSETS -PathType Container) -and
+            -not (Get-ChildItem -LiteralPath $DEFAULT_ASSETS -Force)) {
+            Remove-Item -LiteralPath $DEFAULT_ASSETS
+        }
+        $wsh = New-Object -ComObject WScript.Shell
+        $lnk = $wsh.CreateShortcut($AssetsLink)
+        $lnk.TargetPath  = $DATA_ROOT
+        $lnk.Description = "Your LangTechDepot Assets, kept at $DATA_ROOT"
+        $lnk.Save()
+    } elseif (Test-Path -LiteralPath $AssetsLink) {
+        Remove-Item -LiteralPath $AssetsLink
+    }
+} catch {
+    Write-Host "Note: could not create the 'Assets' shortcut: $_"
+}
+
+if ($AssetsHere) {
+    $assetsText = @"
+  Assets
+      The LangTechDepot folders you chose, such as Android_apps or Keyman.
+"@
+} elseif ($AssetsAway) {
+    $assetsText = @"
+  Assets
+      A shortcut to the LangTechDepot folders you chose, such as
+      Android_apps or Keyman. They are kept at:
+      $DATA_ROOT
+"@
+} else {
+    $assetsText = @"
+  The other folders here (such as Android_apps or Keyman)
+      The LangTechDepot folders you chose.
+"@
+}
+$listPath = "Assets\All_Contents_List\LangTechDepotFiles.txt"
+if ($OldLayout) { $listPath = "All_Contents_List\LangTechDepotFiles.txt" }
 
 try {
     $readMeText = @"
@@ -616,17 +721,18 @@ LangTechDepot
 =============
 (Set up by LangTechDepot version $LTD_VERSION.)
 
-This folder holds the LangTechDepot folders you chose, such as
-Android_apps or Keyman. Each one is kept up to date from the LangTechDepot
-server, automatically, whenever this computer is on the internet.
-
-Please don't change or delete files inside those folders: they are a copy
-of what is on the server. To change an installer, copy it somewhere else
-first.
-
 In this folder:
 
-  Change my folders
+$assetsText
+      Each is kept up to date from the LangTechDepot server, automatically,
+      whenever this computer is on the internet. Please don't change or
+      delete files inside them: they are a copy of what is on the server.
+      To change an installer, copy it somewhere else first.
+
+      $listPath
+      lists every file available in the depot, and the size of each folder.
+
+  Change my Assets
       Add folders, take back ones you ignored, or stop ones you no longer
       need. Opens the same list of folders you saw when you installed.
 
@@ -634,9 +740,6 @@ In this folder:
       Opens the Syncthing page ($GUI_PAGE) in your web browser.
       When every folder there says "Up to Date", you have everything -
       check this before you travel.
-
-  All_Contents_List\LangTechDepotFiles.txt
-      Every file available in the depot, and the size of each folder.
 
 For Command Prompt users:
   modify-langtechdepot list                 every folder and its state
@@ -669,11 +772,14 @@ if (Test-Path $ModifyBat) {
         $lnk.Description      = "Choose which LangTechDepot folders this computer keeps"
         $lnk.Save()
     } catch {
-        Write-Host "Note: could not create the 'Change my folders' shortcut: $_"
+        Write-Host "Note: could not create the 'Change my Assets' shortcut: $_"
     }
 }
 
-if (-not (Test-Path $PinnedMark)) {
+# Pinned once. A marker naming another folder means an earlier version
+# pinned the synced folders themselves; pin the home folder now instead.
+$pinnedBefore = (Test-Path $PinnedMark) -and ((Get-Content -Raw $PinnedMark) -like "*$HOME_BASE *")
+if (-not $pinnedBefore) {
     try {
         $shell = New-Object -ComObject Shell.Application
         # Quick access, as a shell namespace. Skip the pin if the folder is
@@ -681,12 +787,12 @@ if (-not (Test-Path $PinnedMark)) {
         $quick = $shell.Namespace("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}")
         $listed = $false
         if ($quick) {
-            foreach ($it in $quick.Items()) { if ($it.Path -eq $DATA_ROOT) { $listed = $true } }
+            foreach ($it in $quick.Items()) { if (Test-SamePath $it.Path $HOME_BASE) { $listed = $true } }
         }
-        if (-not $listed) { $shell.Namespace($DATA_ROOT).Self.InvokeVerb("pintohome") }
-        Set-Content -Path $PinnedMark -Value "Pinned $DATA_ROOT to Quick access on $(Get-Date -Format s)"
+        if (-not $listed) { $shell.Namespace($HOME_BASE).Self.InvokeVerb("pintohome") }
+        Set-Content -Path $PinnedMark -Value "Pinned $HOME_BASE to Quick access on $(Get-Date -Format s)"
     } catch {
-        Write-Host "Note: could not pin $DATA_ROOT in File Explorer: $_"
+        Write-Host "Note: could not pin $HOME_BASE in File Explorer: $_"
     }
 }
 
@@ -1302,10 +1408,16 @@ if ($CliMode) {
 }
 
 Write-Host " "
-Write-Host "Your LangTechDepot folder is $DATA_ROOT"
-Write-Host "(File Explorer lists it under Quick access). In it:"
+Write-Host "Your LangTechDepot folder is $HOME_BASE"
+Write-Host "(in File Explorer, under Quick access). In it:"
+if ($AssetsAway) {
+    Write-Host "  'Assets' - a shortcut to the folders you chose, kept at"
+    Write-Host "     $DATA_ROOT"
+} elseif ($AssetsHere) {
+    Write-Host "  'Assets' - the folders you chose."
+}
 if (Test-Path $ModifyBat) {
-    Write-Host "  'Change my folders' - add folders, or take back ones you ignored"
+    Write-Host "  'Change my Assets' - add folders, or take back ones you ignored"
     Write-Host "     (click 'Also display ignored folders' in the list to see them)."
 } else {
     Write-Host "  To add folders later, or take back ones you ignored, run this"

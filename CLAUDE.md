@@ -126,8 +126,13 @@ git tag -a v1.0.2 -m "Version 1.0.2: what changed"
 git push --follow-tags        # sends the commit and the tag together
 ```
 
-The workflow also runs on a `v*` tag push, so tagging a commit that is already pushed
-relabels the download. It checks out with `fetch-depth: 0`; a shallow clone has no tags.
+The workflow checks out with `fetch-depth: 0`, since a shallow clone has no tags. It
+does **not** run on tag pushes: `--follow-tags` sends the tag with the commit, so the
+normal `main` run already sees it. (A tag trigger was tried in 1.0.x: the tag run
+cancelled the `main` run - the workflow's concurrency setting - and was then refused
+by the `github-pages` environment, which only lets `main` deploy, so nothing published.)
+To relabel after tagging a commit that is already pushed: Actions -> Publish the
+instructions site -> Run workflow.
 
 ## Commands
 
@@ -183,13 +188,20 @@ only stops the reconciler from re-adding it.
   Raw-text edits go through `[IO.File]::ReadAllText/WriteAllText` with UTF-8, not
   `Get-Content`/`Set-Content`. (The installer still carries a clean-up for configs the
   old helper damaged; see "CLEAN-UP FOR CONFIGS DAMAGED BY EARLIER VERSIONS".)
-- **The programs are hidden; the content folder is not.** `syncthing.exe`,
+- **The programs are hidden; the home folder is not.** `syncthing.exe`,
   `modify-langtechdepot.bat` and the config stay in `%LOCALAPPDATA%` (hidden, standard
-  for per-user programs, and where antivirus has passed them). The synced folders'
-  root (`$DATA_ROOT`, default `%USERPROFILE%\LangTechDepot`) is what users see: the
-  installer writes `READ-ME.txt`, `Change my folders.lnk` and an `Am I up-to-date, and
-  advanced management.url` there on every run, and pins it to Explorer's Quick access
-  once. Not Downloads (gets cleaned out, and a startup program there looks like
+  for per-user programs, and where antivirus has passed them). What users see is the
+  home folder `%USERPROFILE%\LangTechDepot` (`$HOME_BASE`), always in the same place
+  and pinned once to Explorer's Quick access. Every run writes `READ-ME.txt`,
+  `Change my Assets.lnk` and `Am I up-to-date, and advanced management.url` there, plus
+  **`Assets`**: the synced folders' root (`$DATA_ROOT`). By default that is the real
+  folder `$HOME_BASE\Assets`; if the user picks somewhere else (another drive, a USB
+  disk), the folder made there is called `LangTechDepot` and `Assets` in the home
+  folder is a `.lnk` shortcut to it - not a junction, which backup programs follow.
+  So the instructions are identical for everyone ("Quick access -> LangTechDepot ->
+  Assets"), and the support items survive a USB disk being unplugged. Installs from
+  before 1.1 kept the folders directly in the home folder; the installer leaves those
+  as they are (no `Assets` item). Not Downloads (gets cleaned out, and a startup program there looks like
   malware), not Documents/Desktop (often OneDrive-synced, so gigabytes would upload).
 - **People are told `localhost:8384`; the script uses `127.0.0.1:8384`.** Syncthing
   is bound to 127.0.0.1; "localhost" may resolve to `::1` first. Browsers fall back,
