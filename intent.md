@@ -50,9 +50,7 @@ per-user systemd unit with lingering on Linux — and keeps accepted folders cur
 continuously. This is strictly better than the original "run a script overnight before
 you leave": there is no script to remember and no window to miss.
 
-The question that matters on the morning you pack — *"am I ready to leave?"* — is
-answered by Syncthing's own page at `127.0.0.1:8384`: each folder shows its progress,
-and when every one reads **Up to Date**, you are good to go.
+The question that matters on the night before you leave — *"am I ready to leave?"* — is answered by the item in your `LangTechDepot` folder called `Am I up-to-date, and advanced management.url`, which will open your browser at Syncthing's own page at `localhost:8384`: each folder shows its progress, and when every one reads **Up to Date**, you are good to go.
 
 ![Syncthing's folder list, some folders still syncing](./images/Folders-partly-updated.jpg)
 
