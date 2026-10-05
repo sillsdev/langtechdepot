@@ -54,10 +54,13 @@ The question that matters on the night before you leave — *"am I ready to leav
 
 ![Syncthing's folder list, some folders still syncing](./images/Folders-partly-updated.jpg)
 
-**Gap.** Only that page answers it, and nothing sends the user there for that reason —
-neither the instructions site nor the installers mention it as the readiness check. If
-the depot ever puts its own program in front of Syncthing's page, that program has to
-answer the question too.
+But how did you know to do that? When you installed the LangTechDepot software, it finished with some messages, including these:
+
+![Installer messages for after installation.jpg](./images/Installer messages for after installation.jpg)
+
+Also, whenever you go to the folder `LangTechDepot`, you'll see it there:
+
+![Explorer showing LangTechDepot](./images/Explorer showing LangTechDepot.jpg)
 
 ### G2 — You have the thing you didn't know you'd need
 
@@ -72,10 +75,15 @@ so the user sees what each folder holds and how big it is before choosing, and c
 the whole list for the thing they half-remember.
 
 **Gap.** The picker starts with every new folder unticked, and an unticked folder is
-*ignored*, not merely skipped — so the default posture at step 4 is now to take less, not
-more. Re-running the installer brings ignored folders back, but the user has to know to.
+*ignored*, not merely skipped — so the default posture at step 4 is now more refined. I want to take the things I might need, not the things a language develpment worker anywhere in the world might need.
+
+If I work in a French-speaking country, by coworkers will want Windows programs with the French interface, and we'll want to use the training videos in French. We won't need the equivalents for Russian or Indonesian.
+
 The descriptions also reach only the picker: a folder accepted straight from Syncthing's
 own page shows whatever label the server gives it.
+
+*Actually, the Syncthing GUI doesn't show ignored folders, and if you use the GUI to unignore a folder, it will suggest the label (ie. the terse description), not the folder id. Using the picker's `Show ignored folders` button is the best way to go. JimH44* 
+
 
 ### G3 — It lands where you want it, including a thumb drive
 
