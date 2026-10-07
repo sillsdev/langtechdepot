@@ -18,8 +18,28 @@ StateDirectory=langtechdepot
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+# read-only, not true: SYNCTHING_CONFIG in register.env may point into
+# /home/syncthing/... to read the API key from config.xml, and "true" would
+# hide /home entirely. Nothing under /home is ever written.
+ProtectHome=read-only
 ReadWritePaths=/var/lib/langtechdepot
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+# IPv4/IPv6 for Syncthing on 127.0.0.1 and SMTP out; AF_UNIX for the journal
+# and name resolution.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# One thread per open connection; this caps a slow-client pile-up.
+TasksMax=64
+MemoryMax=256M
 
 [Install]
 WantedBy=multi-user.target

@@ -26,12 +26,14 @@ Run:  python3 register.py                 # the service
 """
 
 import html
+import ipaddress
 import json
 import os
 import re
 import secrets
 import smtplib
 import sqlite3
+import ssl
 import sys
 import threading
 import time
@@ -42,11 +44,12 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import os
 from dotenv import load_dotenv
 
-# Load the file directly if it exists (ignores it if it doesn't)
-load_dotenv('/etc/langtechdepot/register.env')
+# Load the file directly if it exists (ignores it if it doesn't). Variables
+# already in the environment win. REGISTER_ENV exists so the test suite can
+# point this somewhere empty when it runs on the server itself.
+load_dotenv(os.environ.get("REGISTER_ENV", "/etc/langtechdepot/register.env"))
 
 # Canonical Syncthing device ID: 8 dash-separated groups of 7 base32 chars.
 DEVICE_ID_RE = re.compile(r"^[A-Z2-7]{7}(-[A-Z2-7]{7}){7}$")
@@ -72,10 +75,18 @@ SMTP_PASS = os.environ.get("SMTP_PASS", "")
 MAIL_FROM = os.environ.get("MAIL_FROM", "langtechdepot@sil.org")
 
 # Registration is cheap but not free: cap attempts per client address so a
-# script cannot mint tokens or grind at /register unbounded.
-RATE_LIMIT = (10, 3600)  # attempts, seconds
-_rate: dict[str, list[float]] = {}
+# script cannot mint tokens or grind at /register unbounded. The form mints a
+# token and sends mail, so it is the tighter bucket; the installer may retry
+# (the Linux one POSTs twice per failed attempt to read the reason).
+RATE_LIMITS = {"request": (10, 3600), "register": (30, 3600)}  # attempts, seconds
+_rate: dict[tuple[str, str], list[float]] = {}
 _rate_lock = threading.Lock()
+_rate_pruned = 0.0
+
+# Syncthing's config PATCH is read-modify-write on the device list, and both
+# the request threads and the reconciler do it. Serialise them, or two
+# concurrent writers each drop the other's device.
+_share_lock = threading.Lock()
 
 
 def now() -> str:
@@ -126,18 +137,31 @@ def db() -> sqlite3.Connection:
         revoked_at  TEXT
     )""")
     conn.commit()
-    # Set permissions on DB_PATH to 640, so not readable by Others.
-    os.chmod(DB_PATH, 0o640)
+    # Set permissions on DB_PATH to 640, so not readable by Others. Only the
+    # owner may chmod: if root created the file (`sudo ltd-sync-admin` before
+    # the service's first start) the service must still come up.
+    try:
+        os.chmod(DB_PATH, 0o640)
+    except OSError:
+        pass
     return conn
 
 
-def rate_ok(addr: str) -> bool:
-    limit, window = RATE_LIMIT
-    cutoff = time.monotonic() - window
+def rate_ok(bucket: str, addr: str) -> bool:
+    global _rate_pruned
+    limit, window = RATE_LIMITS[bucket]
+    t = time.monotonic()
+    cutoff = t - window
     with _rate_lock:
-        hits = [t for t in _rate.get(addr, []) if t > cutoff]
-        hits.append(time.monotonic())
-        _rate[addr] = hits
+        # Drop addresses with no recent hits, so the table does not grow for
+        # as long as the service runs.
+        if t - _rate_pruned > 300:
+            for k in [k for k, v in _rate.items() if not v or v[-1] <= cutoff]:
+                del _rate[k]
+            _rate_pruned = t
+        hits = [h for h in _rate.get((bucket, addr), []) if h > cutoff]
+        hits.append(t)
+        _rate[(bucket, addr)] = hits
         return len(hits) <= limit
 
 
@@ -153,7 +177,7 @@ def send_mail(to: str, subject: str, body: str) -> bool:
     msg.set_content(body)
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-            s.starttls()
+            s.starttls(context=ssl.create_default_context())
             if SMTP_USER:
                 s.login(SMTP_USER, SMTP_PASS)
             s.send_message(msg)
@@ -173,7 +197,14 @@ def share_catalog_with(device_ids: set[str]) -> list[str]:
     each folder is Send Only. PATCH replaces child arrays wholesale, so the
     device list is read-modify-write rather than append. Only the keys that
     are actually wrong go into the payload, and the journal line says which,
-    so "flipped to sendonly" is never reported for a folder that already was."""
+    so "flipped to sendonly" is never reported for a folder that already was.
+    Holds _share_lock throughout, so the read and the write cannot interleave
+    with another thread's."""
+    with _share_lock:
+        return _share_catalog_with(device_ids)
+
+
+def _share_catalog_with(device_ids: set[str]) -> list[str]:
     touched = []
     for folder in st("GET", "/rest/config/folders") or []:
         fid = folder["id"]
@@ -199,7 +230,7 @@ def share_catalog_with(device_ids: set[str]) -> list[str]:
         if not patch:
             continue
 
-        st("PATCH", f"/rest/config/folders/{fid}", patch)
+        st("PATCH", f"/rest/config/folders/{urllib.parse.quote(fid, safe='')}", patch)
         print(f"[reconcile] {fid}: {', '.join(changed)}", flush=True)
     return touched
 
@@ -213,6 +244,11 @@ def register_device(token: str, device_id: str, device_name: str) -> dict:
 
     conn = db()
     try:
+        # Revoking deletes the device from Syncthing; without this check a
+        # fresh token from the form would put it straight back.
+        if conn.execute("SELECT 1 FROM tokens WHERE device_id = ? AND revoked_at IS NOT NULL "
+                        "LIMIT 1", (device_id,)).fetchone():
+            raise ValueError("access for this machine has been revoked")
         row = conn.execute("SELECT * FROM tokens WHERE token = ?", (token,)).fetchone()
         if row is None:
             raise ValueError("unknown token")
@@ -223,24 +259,42 @@ def register_device(token: str, device_id: str, device_name: str) -> dict:
         if row["used_at"] and row["device_id"] != device_id:
             raise ValueError("token has already been used on another machine")
 
-        existing = {d["deviceID"] for d in st("GET", "/rest/config/devices") or []}
-        if device_id not in existing:
-            st("POST", "/rest/config/devices", {
-                "deviceID": device_id,
-                "name": device_name,     # deliberately carries no token: peers see this
-                "addresses": ["dynamic"],
-            })
-        folders = share_catalog_with({device_id})
-
-        conn.execute(
-            "UPDATE tokens SET used_at = ?, device_id = ?, device_name = ? WHERE token = ?",
-            (now(), device_id, device_name, token),
-        )
+        # Claim the token before touching Syncthing, atomically: the checks
+        # above are a read, and two installers racing on one token would both
+        # pass them. Only one UPDATE can win. A fresh claim is released again
+        # if Syncthing then fails, so the user can retry with the same token;
+        # the same device re-running the installer is accepted as before.
+        claim = ("UPDATE tokens SET used_at = ?, device_id = ?, device_name = ? "
+                 "WHERE token = ? AND revoked_at IS NULL AND approved = 1 AND ")
+        fresh = conn.execute(claim + "used_at IS NULL",
+                             (now(), device_id, device_name, token)).rowcount == 1
+        if not fresh and conn.execute(claim + "device_id = ?",
+                                      (now(), device_id, device_name, token, device_id)
+                                      ).rowcount != 1:
+            conn.rollback()
+            raise ValueError("token has already been used on another machine")
         conn.commit()
+
+        try:
+            existing = {d["deviceID"] for d in st("GET", "/rest/config/devices") or []}
+            if device_id not in existing:
+                st("POST", "/rest/config/devices", {
+                    "deviceID": device_id,
+                    "name": device_name,     # deliberately carries no token: peers see this
+                    "addresses": ["dynamic"],
+                })
+            folders = share_catalog_with({device_id})
+            me = st("GET", "/rest/system/status") or {}
+        except BaseException:
+            if fresh:
+                conn.execute("UPDATE tokens SET used_at = NULL, device_id = NULL, "
+                             "device_name = NULL WHERE token = ? AND device_id = ?",
+                             (token, device_id))
+                conn.commit()
+            raise
     finally:
         conn.close()
 
-    me = st("GET", "/rest/system/status") or {}
     server_id = me.get("myID", "")
     addresses = ["dynamic"]
     extra = os.environ.get("SERVER_ADDRESS", "")
@@ -500,9 +554,32 @@ def pick_os(value: str) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "langtechdepot-register"
+    # Socket timeout per read/write: a client that opens a connection and then
+    # trickles (or never sends) its body releases its thread after this long.
+    timeout = 20
+
+    def client_ip(self) -> str:
+        """The address to rate-limit and log. Behind Caddy every peer is
+        loopback, so then the real client is the last X-Forwarded-For entry:
+        the one Caddy itself appended. Anything earlier in the header came
+        from the client and is not trusted. The service binds localhost only,
+        so a loopback peer is always the proxy (or someone on this box)."""
+        peer = self.client_address[0]
+        try:
+            loopback = ipaddress.ip_address(peer).is_loopback
+        except ValueError:
+            loopback = False
+        headers = getattr(self, "headers", None)
+        if loopback and headers is not None:
+            last = (headers.get("X-Forwarded-For") or "").split(",")[-1].strip()
+            try:
+                return str(ipaddress.ip_address(last))
+            except ValueError:
+                pass
+        return peer
 
     def log_message(self, fmt, *args):
-        print(f"[http] {self.address_string()} {fmt % args}", flush=True)
+        print(f"[http] {self.client_ip()} {fmt % args}", flush=True)
 
     def _send(self, code: int, body: bytes, ctype: str):
         self.send_response(code)
@@ -510,8 +587,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        # The token page must not sit in a browser or proxy cache, and no page
+        # here has any business inside someone else's frame.
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy",
+                         "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers()
         self.wfile.write(body)
+
+    def _fail(self, path: str, code: int, message: str):
+        """An error in the shape the caller reads: JSON for the installer,
+        a page for a browser."""
+        if path == "/register":
+            self._json(code, {"ok": False, "error": message})
+        else:
+            self._page(code, f"<h1>{html.escape(message)}</h1>")
 
     def _page(self, code: int, body: str, title: str = "register"):
         page = (PAGE.replace("@@TITLE@@", title)
@@ -541,13 +632,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
-        length = int(self.headers.get("Content-Length") or 0)
+        # An unread body would be parsed as the next request on a kept-alive
+        # connection, so every early rejection below also closes it.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if length < 0:
+            self.close_connection = True
+            self._fail(path, 400, "bad Content-Length")
+            return
         if length > 64_000:
-            self._json(413, {"ok": False, "error": "too large"})
+            self.close_connection = True
+            self._fail(path, 413, "too large")
             return
         raw = self.rfile.read(length)
 
-        if not rate_ok(self.client_address[0]):
+        bucket = "register" if path == "/register" else "request"
+        if not rate_ok(bucket, self.client_ip()):
             if path == "/register":
                 self._json(429, {"ok": False, "error": "too many attempts; try again later"})
             else:
@@ -557,14 +659,32 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/register":
             try:
                 payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise ValueError("expected a JSON object")
                 result = register_device(
                     str(payload["token"]).strip(),
                     str(payload["deviceID"]).strip().upper(),
                     str(payload.get("deviceName", "")).strip(),
                 )
-            except (KeyError, ValueError, json.JSONDecodeError) as exc:
+            except KeyError as exc:
+                self._json(400, {"ok": False, "error": f"missing field {exc}"})
+            except ValueError as exc:  # includes JSONDecodeError, UnicodeDecodeError
                 self._json(400, {"ok": False, "error": str(exc)})
-            except urllib.error.URLError as exc:
+            except urllib.error.HTTPError as exc:
+                # Syncthing answered and said no - typically a device ID that
+                # fits the pattern but fails its check digits. Retrying the
+                # same thing will not help, so do not say "busy".
+                detail = ""
+                try:
+                    detail = exc.read(300).decode("utf-8", "replace").strip().splitlines()[0]
+                except Exception:  # noqa: BLE001 - the detail is a courtesy
+                    pass
+                print(f"[register] syncthing refused: HTTP {exc.code} {detail}", flush=True)
+                self._json(502, {"ok": False, "error":
+                                 "the depot server could not add this machine"
+                                 + (f" (Syncthing said: {detail})" if detail else "")
+                                 + ". Check the device ID; trying again will not help."})
+            except OSError as exc:  # URLError, timeouts, refused connections
                 print(f"[register] syncthing unreachable: {exc}", flush=True)
                 self._json(503, {"ok": False, "error": "server busy; try again shortly"})
             else:
@@ -607,7 +727,11 @@ def reconcile_loop():
             conn = db()
             rows = conn.execute(
                 "SELECT DISTINCT device_id FROM tokens "
-                "WHERE device_id IS NOT NULL AND revoked_at IS NULL"
+                "WHERE device_id IS NOT NULL AND revoked_at IS NULL "
+                # A device revoked under any token stays out, even if
+                # another of its tokens was never revoked.
+                "AND device_id NOT IN (SELECT device_id FROM tokens "
+                "WHERE revoked_at IS NOT NULL AND device_id IS NOT NULL)"
             ).fetchall()
             conn.close()
             ids = {r["device_id"] for r in rows if r["device_id"]}
@@ -663,18 +787,26 @@ def admin(argv: list[str]) -> None:
             ).fetchall()
             if not rows:
                 sys.exit("nothing matched")
+            # Flag first and commit, then delete from Syncthing. The other way
+            # round, the reconciler (every 60 s) or a re-register could re-add
+            # the device between the delete and the flag. The flag also makes
+            # register_device refuse this device ID from now on, whatever token
+            # it brings.
+            stamp = now()
             for r in rows:
-                # Removing the device from Syncthing is what actually cuts access;
-                # the DB flag only keeps the reconciler from re-adding it.
+                conn.execute("UPDATE tokens SET revoked_at = COALESCE(revoked_at, ?) "
+                             "WHERE token = ?", (stamp, r["token"]))
+            conn.commit()
+            for r in rows:
+                # Removing the device from Syncthing is what actually cuts access.
                 if r["device_id"]:
                     try:
-                        st("DELETE", f"/rest/config/devices/{r['device_id']}")
+                        st("DELETE", "/rest/config/devices/"
+                                     + urllib.parse.quote(r["device_id"], safe=""))
                     except urllib.error.HTTPError as exc:
                         if exc.code != 404:
                             raise
-                conn.execute("UPDATE tokens SET revoked_at = ? WHERE token = ?", (now(), r["token"]))
                 print(f"revoked {r['email']} {r['device_id'] or '(never used)'}")
-            conn.commit()
         else:
             sys.exit(f"unknown admin command: {cmd}")
     finally:

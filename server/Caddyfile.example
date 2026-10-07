@@ -13,16 +13,29 @@ depot.langtech.cloud {
 	output file /var/log/caddy/langtechdepot.log
     }
 
-    # 1. Route the "/files" path to our software download tree
-    handle_path /files* {
-	root * /data/LT/Groups
-    	file_server browse
+    # 1. Route the "/files" path to our software download tree.
+    #    "/files/*", not "/files*": the latter also matches /filesX. The bare
+    #    /files gets a redirect so relative links in the listing resolve.
+    redir /files /files/
+    handle_path /files/* {
+        root * /data/LT/Groups
+        file_server browse {
+            # Dotfiles (Syncthing's .stfolder, .stversions, ...) are not for
+            # browsing.
+            hide .*
+        }
     }
 
     # 2. Route absolutely everything else to our register.py script
     handle {
-	# The registration service binds to localhost only; Caddy is its TLS front.
-	reverse_proxy localhost:8385
+        # The registration service binds to 127.0.0.1 only (IPv4, so not
+        # "localhost", which may resolve to ::1 first); Caddy is its TLS front.
+        # Its biggest legitimate body is a short form; register.py refuses
+        # anything over 64 000 bytes itself, this stops it at the door.
+        request_body {
+            max_size 64KB
+        }
+        reverse_proxy 127.0.0.1:8385
     }
 }
 
@@ -38,18 +51,14 @@ depot.langtech.cloud {
 # /srv/langtechdepot-site on this box and swap block 2 above for:
 #
 #     # The form keeps an address of its own once the site owns "/";
-#     # register.py serves it at both / and /signup.
-#     handle /signup* {
-#         reverse_proxy localhost:8385
-#     }
-#     handle /register* {
-#         reverse_proxy localhost:8385
-#     }
-#     handle /request* {
-#         reverse_proxy localhost:8385
-#     }
-#     handle /healthz* {
-#         reverse_proxy localhost:8385
+#     # register.py serves it at both / and /signup. These are the only
+#     # paths it answers, so match them exactly.
+#     @app path /signup /register /request /healthz
+#     handle @app {
+#         request_body {
+#             max_size 64KB
+#         }
+#         reverse_proxy 127.0.0.1:8385
 #     }
 #     handle {
 #         root * /srv/langtechdepot-site

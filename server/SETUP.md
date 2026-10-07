@@ -124,18 +124,19 @@ the place to which you copied register.py,
 then enable the script:
 ``` bash
 $EDITOR ltd-sync-admin	# check folder of register.py
-chmod ug+x !$
-# Make a symbolic link to it in /usr/local/bin
-sudo ln -s `pwd`/ltd-sync-admin /usr/local/bin/ltd-sync-admin
+# Install a root-owned copy (not a symlink into this checkout: whoever can edit
+# the checkout would then choose what runs under your sudo). Re-run after edits.
+sudo install -o root -g root -m 755 ltd-sync-admin /usr/local/bin/
 ```
 
 So that the clients' tokens can be backed up,
 make sure that the backup script will put them in the right place.
 ``` bash
 $EDITOR token_backup.sh	# check BACKUP_DIR; the script uses its own value
-chmod ug+x !$
-# Make a symbolic link to it in /usr/local/bin
-sudo ln -s `pwd`/token_backup.sh /usr/local/bin/token_backup.sh
+# Install a root-owned copy in /usr/local/bin. Not a symlink: root's cron runs
+# it, so a link into your checkout would let anyone who can edit the checkout
+# run commands as root. Re-run this line after every edit to token_backup.sh.
+sudo install -o root -g root -m 755 token_backup.sh /usr/local/bin/
 BACKUP_DIR=/data/LT/Backups/ClientsHowto	# must match BACKUP_DIR in the script
 sudo mkdir -p $BACKUP_DIR
 sudo ls -lrt $BACKUP_DIR
@@ -147,11 +148,15 @@ You should see a new file like register_yyyy-mm-dd_hhmmss.db
 Now add a cron line so the backup script runs at 1:30 AM daily.
 Copy this line to the clipboard:
 ```
-30 1 * * * /usr/local/bin/token_backup.sh >/dev/null 2>&1
+30 1 * * * /usr/local/bin/token_backup.sh
 ```
 Then edit the crontab file for root and paste at the end.
 ``` bash
 sudo crontab -e
+```
+The script logs every run, and every failure, to the journal; check it with
+``` bash
+journalctl -t token_backup
 ```
 
 ## 5. Put TLS in front
