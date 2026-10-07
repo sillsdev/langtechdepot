@@ -9,7 +9,8 @@
 #
 #   bash install-langtechdepot.sh
 #
-# No token yet? Register at the URL below and one is emailed to you.
+# No token yet? Register at the URL below: the token is shown on the page and
+# emailed to you as well.
 
 set -euo pipefail
 
@@ -35,27 +36,95 @@ EOF
     exit 1
 fi
 
+# The same goes for the two other things the installer relies on: a desktop to
+# show that window on, and a systemd user session to keep Syncthing running.
+# Both are checked here, before anything is installed or a token is spent.
+if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    cat >&2 <<EOF
+The installer needs to show a window with the list of folders, but this
+terminal is not connected to a desktop (for example, it is a remote ssh
+session). Nothing has been installed and your token has not been used.
+
+Open a terminal on the computer's own desktop and paste the same command again.
+
+Help: $HELP_URL
+EOF
+    exit 1
+fi
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+    cat >&2 <<EOF
+This computer's login session cannot run background programs for you
+(systemctl --user is not available), so Syncthing could not be kept running.
+Nothing has been installed and your token has not been used.
+
+Log out and back in on the computer's own desktop, then paste the same command
+again. If that does not help, whoever looks after this computer will need to
+look at it.
+
+Help: $HELP_URL
+EOF
+    exit 1
+fi
+
 DATA_ROOT="$HOME/LangTechDepot"
-BIN="$HOME/.local/bin/syncthing"
+LOCAL_BIN="$HOME/.local/bin/syncthing"
+BIN=''
 
 mkdir -p "$DATA_ROOT" "$HOME/.local/bin"
 
-# Prefer a packaged Syncthing if the machine already has one.
+# This script needs the `generate` and `serve` subcommands. 1.18.0 still only
+# knows -generate=<dir> as a flag and fails on `generate --home`; 1.19 has both
+# subcommands, so that is the floor. Ubuntu 22.04 packages 1.18.0, Debian 11
+# 1.12; anything older than 1.19 is passed over for the release download.
+st_new_enough() { # st_new_enough PATH -> true for Syncthing 1.19 or later
+    local v major minor
+    v=$("$1" --version 2>/dev/null | grep -o 'v[0-9][0-9]*\.[0-9][0-9]*' | head -n 1) || true
+    [ -n "$v" ] || return 1
+    IFS=. read -r major minor <<< "${v#v}"
+    [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 19 ]; }
+}
+
+# Prefer a packaged Syncthing if the machine already has a recent enough one.
 if command -v syncthing >/dev/null 2>&1; then
-    BIN=$(command -v syncthing)
-elif ! [ -x "$BIN" ]; then
-    echo 'Downloading Syncthing...'
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64) st_arch=amd64;; aarch64) st_arch=arm64;; armv7l) st_arch=arm;;
-        *) echo "unsupported architecture: $arch" >&2; exit 1;;
-    esac
-    url=$(curl -fsSL https://api.github.com/repos/syncthing/syncthing/releases/latest |
-        python3 -c "import json,sys; print(next(a['browser_download_url'] for a in json.load(sys.stdin)['assets'] if 'linux-$st_arch-' in a['name'] and a['name'].endswith('.tar.gz')))")
-    tmp=$(mktemp -d)
-    curl -fsSL "$url" | tar -xz -C "$tmp"
-    cp "$tmp"/syncthing-*/syncthing "$BIN"
-    rm -rf "$tmp"
+    if st_new_enough "$(command -v syncthing)"; then
+        BIN=$(command -v syncthing)
+    else
+        echo "The Syncthing already on this computer is too old; using a separate copy instead."
+    fi
+fi
+if [ -z "$BIN" ]; then
+    BIN="$LOCAL_BIN"
+    if ! [ -x "$BIN" ] || ! st_new_enough "$BIN"; then
+        echo 'Downloading Syncthing...'
+        arch=$(uname -m)
+        case "$arch" in
+            x86_64) st_arch=amd64;; aarch64) st_arch=arm64;; armv7l) st_arch=arm;;
+            *) echo "unsupported architecture: $arch" >&2; exit 1;;
+        esac
+        tmp=$(mktemp -d)
+        # No --max-time on the download itself - a slow link can take a long
+        # time honestly - but give up if it stalls below 1 KB/s for two minutes.
+        if url=$(curl -fsSL --connect-timeout 20 --max-time 120 \
+                    https://api.github.com/repos/syncthing/syncthing/releases/latest |
+                 python3 -c "import json,sys; print(next(a['browser_download_url'] for a in json.load(sys.stdin)['assets'] if 'linux-$st_arch-' in a['name'] and a['name'].endswith('.tar.gz')))") &&
+           curl -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 120 "$url" | tar -xz -C "$tmp"; then
+            # Copy then rename: an older copy of ours may be running, and
+            # overwriting a running binary in place fails ("Text file busy").
+            cp "$tmp"/syncthing-*/syncthing "$BIN.new"
+            mv -f "$BIN.new" "$BIN"
+            rm -rf "$tmp"
+        else
+            rm -rf "$tmp"
+            cat >&2 <<EOF
+
+Could not download Syncthing. Check the internet connection and paste the same
+command again. Nothing has been registered and your token has not been used.
+
+Help: $HELP_URL
+EOF
+            exit 1
+        fi
+    fi
 fi
 echo "Using Syncthing at $BIN"
 
@@ -64,7 +133,7 @@ echo "Using Syncthing at $BIN"
 # when a config.xml already exists in either, and only otherwise falls back to
 # the state dir this used to assume. So any machine that has run Syncthing
 # before keeps its config where this script would not look, and builds before
-# 1.27 (Debian 12 packages 1.23) use ~/.config/syncthing even when fresh -
+# 1.27 (Debian 12 packages 1.19.2) use ~/.config/syncthing even when fresh -
 # either way the API key read below died on a missing file. setup-langtechdepot.ps1
 # passes --home on Windows for the same reason.
 STATE_HOME="$HOME/.local/state"
@@ -116,8 +185,25 @@ GUI_URL="http://$(xmlget ./gui/address)"
 GUI_PAGE="${GUI_URL/127.0.0.1/localhost}"
 
 api() { # api METHOD PATH [JSON]
-    curl -fsS -X "$1" -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+    curl -fsS --connect-timeout 20 --max-time 60 \
+        -X "$1" -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
         ${3:+-d "$3"} "$GUI_URL$2"
+}
+
+# For anything that fails once the server has accepted this machine. The token
+# is not lost: the server accepts the same token again from the same machine,
+# and once the server is in Syncthing's list a re-run does not ask at all.
+after_registration_failed() { # after_registration_failed MESSAGE
+    cat >&2 <<EOF
+
+$1
+This computer is registered with the depot, so you will not need a new token:
+paste the same command again to finish (if it asks for a token, paste the same
+one as before).
+
+Help: $HELP_URL
+EOF
+    exit 1
 }
 
 echo 'Waiting for Syncthing...'
@@ -150,7 +236,7 @@ server_name = sys.argv[3]
 
 try:
     req = urllib.request.Request(f'{gui_url}/rest/config/devices', headers={'X-API-Key': api_key})
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:
         devices = json.loads(resp.read().decode('utf-8'))
         for dev in devices:
             # Match specifically on the LangTechDepot Server plain-text name
@@ -172,29 +258,39 @@ else
     echo
 
     RESPONSE=''
+    REG_BODY=$(mktemp)
+    trap 'rm -f "$REG_BODY"' EXIT
     for attempt in 1 2 3; do
         echo "(In a terminal, paste with Ctrl+Shift+V, or right-click and choose Paste.)"
         read -r -p 'Paste your LangTechDepot token: ' TOKEN
         TOKEN=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
         [ -n "$TOKEN" ] || { echo 'Nothing entered.'; continue; }
 
-        if RESPONSE=$(curl -fsS -X POST -H 'Content-Type: application/json' \
-            -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
-            "$REGISTER_URL/register" 2>/dev/null); then
+        # One request per attempt, keeping both the status and the body: the
+        # server rate-limits /register, so asking twice for the reason (once
+        # with -f, once without) used to spend two of its attempts.
+        HTTP=$(curl -s --connect-timeout 20 --max-time 120 -o "$REG_BODY" -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' \
+            -d "$(python3 -c 'import json,sys; print(json.dumps({"token": sys.argv[1], "deviceID": sys.argv[2], "deviceName": sys.argv[3]}))' "$TOKEN" "$MY_ID" "$DEVICE_NAME")" \
+            "$REGISTER_URL/register") || HTTP=000
+        if [ "$HTTP" = 200 ]; then
+            RESPONSE=$(cat "$REG_BODY")
             echo
             echo 'Registered.'
             break
         fi
 
-        # curl -f swallows the body on 4xx, so ask again without it for the reason.
-        REASON=$(curl -sS -X POST -H 'Content-Type: application/json' \
-            -d "{\"token\":\"$TOKEN\",\"deviceID\":\"$MY_ID\",\"deviceName\":\"$DEVICE_NAME\"}" \
-            "$REGISTER_URL/register" 2>/dev/null |
-            python3 -c "import json,sys; print(json.load(sys.stdin).get('error','registration failed'))" 2>/dev/null || echo 'could not reach the registration server')
+        if [ "$HTTP" = 000 ]; then
+            REASON='could not reach the registration server'
+        else
+            REASON=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('error') or 'registration failed')" \
+                "$REG_BODY" 2>/dev/null || echo "registration failed (HTTP $HTTP)")
+        fi
         echo "Registration failed: $REASON"
         RESPONSE=''
         [ "$attempt" -lt 3 ] && echo 'Try again.'
     done
+    rm -f "$REG_BODY"
 
     if [ -z "$RESPONSE" ]; then
         echo
@@ -205,21 +301,25 @@ else
 
     # The server tells us its own identity, so nothing about it is hardcoded here.
     # Extract server ID and register the server device in Syncthing
-    SERVER_ID=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin)['serverDeviceID'])")
-    SERVER_ADDRS=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['serverAddresses']))")
+    SERVER_ID=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin)['serverDeviceID'])") &&
+    SERVER_ADDRS=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['serverAddresses']))") ||
+        after_registration_failed "The registration server's reply could not be read."
 
     # introducer=true: the server introduces us to other field machines, so they
     # swarm with each other instead of every download crossing the ocean.
-    api POST /rest/config/devices "{
+    if ! api POST /rest/config/devices "{
       \"deviceID\": \"$SERVER_ID\",
       \"name\": \"$SERVER_NAME\",
       \"addresses\": $SERVER_ADDRS,
       \"introducer\": true
-    }" >/dev/null 2>&1 || true
+    }" >/dev/null; then
+        after_registration_failed "Could not add the LangTechDepot server to Syncthing on this computer."
+    fi
 fi
 
 # Receive-only: a stray local edit gets flagged and reverted, never propagated.
-api PATCH /rest/config/defaults/folder "{\"type\": \"receiveonly\", \"path\": \"$DATA_ROOT\"}" >/dev/null
+api PATCH /rest/config/defaults/folder "{\"type\": \"receiveonly\", \"path\": \"$DATA_ROOT\"}" >/dev/null ||
+    after_registration_failed "Could not set Syncthing's folder defaults on this computer."
 
 # -----------------------------------------------------------------------------
 # AUTO-SUBSCRIBE: All_Contents_List
@@ -238,7 +338,7 @@ echo " "
 sleep 4
 mkdir -p "$AUTO_FOLDER_PATH"
 
-api POST /rest/config/folders "{
+if ! api POST /rest/config/folders "{
   \"id\": \"$AUTO_FOLDER_ID\",
   \"label\": \"All_Contents_List -- a list of all files available\",
   \"path\": \"$AUTO_FOLDER_PATH\",
@@ -246,7 +346,9 @@ api POST /rest/config/folders "{
   \"rescanIntervalS\": 3600,
   \"fsWatcherEnabled\": true,
   \"devices\": [{\"deviceID\": \"$SERVER_ID\"}]
-}" >/dev/null 2>&1 || true
+}" >/dev/null; then
+    after_registration_failed "Could not subscribe Syncthing on this computer to $AUTO_FOLDER_ID."
+fi
 
 echo "Sync data root: $DATA_ROOT"
 echo "Automatically subscribed to: $AUTO_FOLDER_ID"
@@ -292,13 +394,13 @@ done
 #    not the whole device object (GET + PUT), so a concurrent change to the
 #    device cannot be overwritten.
 PICKER_PY=$(cat <<'PY'
-import json, re, sys, urllib.request, urllib.error, datetime
+import json, re, sys, urllib.request, urllib.error, datetime, html
 
 def api(method, path, body=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(GUI + path, data=data, method=method,
                                  headers={'X-API-Key': KEY, 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=60) as r:
         raw = r.read()
         return json.loads(raw) if raw.strip() else None
 
@@ -342,9 +444,11 @@ def read_selections(path):
     rows = []
     with open(path, encoding='utf-8') as f:
         for line in f:
-            parts = line.rstrip('\n').split('|')
+            # Cells went to yad escaped for Pango markup (see 'rows'), so undo
+            # that here; a '|' inside a description is not a column break.
+            parts = [html.unescape(p) for p in line.rstrip('\n').split('|')]
             if len(parts) >= 5 and parts[3]:
-                rows.append({'tick': parts[0].upper() == 'TRUE', 'now': parts[1], 'id': parts[3], 'desc': parts[4]})
+                rows.append({'tick': parts[0].upper() == 'TRUE', 'now': parts[1], 'id': parts[3], 'desc': '|'.join(parts[4:])})
     return rows
 
 cmd = sys.argv[1]
@@ -352,7 +456,7 @@ GUI, KEY, SERVER, CATALOG, ALWAYS = sys.argv[2:7]
 args = sys.argv[7:]
 
 if cmd == 'rows':
-    state_path, show_ignored = args[0], args[1] == '1'
+    state_path, show_ignored, hidden_path = args[0], args[1] == '1', args[2]
     state = read_state(state_path)
     subs = subscribed()
     ign = {i['id'] for i in ignored_list()}
@@ -365,9 +469,16 @@ if cmd == 'rows':
         if now == 'ignored' and not show_ignored:
             hidden += 1; continue
         tick = state.get(fid, fid in subs)
-        for v in ('TRUE' if tick else 'FALSE', now, e['size'], fid, e['desc']):
-            print(v)
-    sys.stderr.write(str(hidden) + '\n')   # how many ignored folders are held back
+        print('TRUE' if tick else 'FALSE')
+        # yad renders list cells as Pango markup, so a bare & or < in a
+        # description would blank the cell. (--no-markup is not an option:
+        # the red NOTE in --text relies on markup.)
+        for v in (now, e['size'], fid, e['desc']):
+            print(html.escape(v, quote=False))
+    # How many ignored folders are held back. A file of its own, not stderr,
+    # so that a real error still reaches the terminal.
+    with open(hidden_path, 'w', encoding='utf-8') as f:
+        f.write(str(hidden) + '\n')
 
 elif cmd == 'state':
     sel_path, mode, state_path = args[0], args[1], args[2]
@@ -434,11 +545,18 @@ YAD_TEMP_INPUT=$(mktemp)
 SELECTIONS_FILE=$(mktemp)
 PICK_STATE=$(mktemp)
 HIDDEN_COUNT_FILE=$(mktemp)
-trap 'rm -f "$YAD_TEMP_INPUT" "$SELECTIONS_FILE" "$PICK_STATE" "$HIDDEN_COUNT_FILE"' EXIT
+# Replaces the earlier EXIT trap, so it must also clean up what that one did.
+trap 'rm -f "$YAD_TEMP_INPUT" "$SELECTIONS_FILE" "$PICK_STATE" "$HIDDEN_COUNT_FILE" ${REG_BODY:+"$REG_BODY"}' EXIT
 SHOW_IGNORED=0
 
+# Everything below runs after registration, so a failure must say that a re-run
+# does not need a new token - not just exit, as set -e would.
+picker_failed() {
+    after_registration_failed "Could not build the list of folders (the error is shown above)."
+}
+
 while true; do
-    picker rows "$PICK_STATE" "$SHOW_IGNORED" > "$YAD_TEMP_INPUT" 2> "$HIDDEN_COUNT_FILE"
+    picker rows "$PICK_STATE" "$SHOW_IGNORED" "$HIDDEN_COUNT_FILE" > "$YAD_TEMP_INPUT" || picker_failed
     HIDDEN=$(tr -dc '0-9' < "$HIDDEN_COUNT_FILE"); HIDDEN=${HIDDEN:-0}
 
     # The extra button only while there is something for it to show.
@@ -472,9 +590,9 @@ while true; do
     set -e
 
     case "$EXIT_CODE" in
-        10) picker state "$SELECTIONS_FILE" all  "$PICK_STATE" ;;
-        12) picker state "$SELECTIONS_FILE" none "$PICK_STATE" ;;
-        14) picker state "$SELECTIONS_FILE" keep "$PICK_STATE"; SHOW_IGNORED=1 ;;
+        10) picker state "$SELECTIONS_FILE" all  "$PICK_STATE" || picker_failed ;;
+        12) picker state "$SELECTIONS_FILE" none "$PICK_STATE" || picker_failed ;;
+        14) picker state "$SELECTIONS_FILE" keep "$PICK_STATE" || picker_failed; SHOW_IGNORED=1 ;;
         0)  break ;;
         *)  echo "Operation cancelled."; exit 0 ;;
     esac
@@ -485,7 +603,8 @@ if [ ! -s "$SELECTIONS_FILE" ]; then
     exit 0
 fi
 
-picker apply "$SELECTIONS_FILE" "$DATA_ROOT" || echo "Some changes failed - see above."
+picker apply "$SELECTIONS_FILE" "$DATA_ROOT" ||
+    echo "Some changes failed - see above. Run the installer again to retry them (no new token needed). Help: $HELP_URL"
 
 echo " "
 echo "To add more folders later, or take back one you ignored,"
