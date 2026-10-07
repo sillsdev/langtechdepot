@@ -463,7 +463,7 @@ def token_page(token: str, osname: str, email: str, emailed: bool) -> str:
     """
     if emailed:
         mail_line = (f"<p>A copy is on its way to <code>{html.escape(email)}</code>, "
-                     "in case you want to finish this on the other machine.</p>")
+                     "which is handy if you are installing on a different machine from this one.</p>")
     else:
         mail_line = ("<p>We could not send this by email, so this page is the only "
                      "copy. Copy it before you leave.</p>")

@@ -111,6 +111,9 @@ API_KEY=$(xmlget ./gui/apikey)
 # port. Read where it actually is instead of assuming, or we would end up
 # talking to the other instance.
 GUI_URL="http://$(xmlget ./gui/address)"
+# What people are shown: same page, but "localhost" reads better than 127.0.0.1.
+# The API calls keep using GUI_URL.
+GUI_PAGE="${GUI_URL/127.0.0.1/localhost}"
 
 api() { # api METHOD PATH [JSON]
     curl -fsS -X "$1" -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
@@ -120,7 +123,7 @@ api() { # api METHOD PATH [JSON]
 echo 'Waiting for Syncthing...'
 for _ in $(seq 1 30); do api GET /rest/system/status >/dev/null 2>&1 && break; sleep 2; done
 api GET /rest/system/status >/dev/null || {
-    echo "Syncthing did not answer at $GUI_URL within 60s." >&2
+    echo "Syncthing did not answer at $GUI_PAGE within 60s." >&2
     echo 'Check: systemctl --user status langtechdepot.service' >&2
     exit 1
 }
@@ -170,6 +173,7 @@ else
 
     RESPONSE=''
     for attempt in 1 2 3; do
+        echo "(In a terminal, paste with Ctrl+Shift+V, or right-click and choose Paste.)"
         read -r -p 'Paste your LangTechDepot token: ' TOKEN
         TOKEN=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
         [ -n "$TOKEN" ] || { echo 'Nothing entered.'; continue; }
@@ -264,7 +268,7 @@ while [ ! -s "$CATALOG_FILE" ]; do
         echo
         echo "Still waiting for the folder catalog after 180 seconds."
         echo "Syncthing is running, but hasn't finished syncing $AUTO_FOLDER_ID from the server yet."
-        echo "Open $GUI_URL and check the Folders list and any red or yellow notices there."
+        echo "Open $GUI_PAGE and check the Folders list and any red or yellow notices there."
         echo "Syncthing will keep running in the background - once $AUTO_FOLDER_ID shows"
         echo "'Up to Date' there, just run this installer again to pick your folders."
         exit 1
@@ -280,8 +284,8 @@ done
 #  - The list opens as things are: subscribed folders ticked. (It used to open
 #    all unticked, and unticked means ignore, so a re-run plus Apply dropped
 #    every folder the user had.)
-#  - All_Contents_List is always listed and ticked; the installer needs it.
-#    "Clear All" leaves it ticked, and an untick is not acted on.
+#  - All_Contents_List is not listed: the installer needs it, so it is always
+#    kept, and a tick box that does nothing only confused people.
 #  - Ignored folders are held back until "Also display ignored folders";
 #    ticking one then un-ignores it. Folders never shown are left alone.
 #  - Ignoring changes only the server device's ignoredFolders field (PATCH),
@@ -355,12 +359,12 @@ if cmd == 'rows':
     hidden = 0
     for e in catalog():
         fid = e['id']
-        always = fid == ALWAYS
-        now = 'subscribed' if (always or fid in subs) else 'ignored' if fid in ign else 'new'
+        if fid == ALWAYS:
+            continue   # always kept; not offered as a choice
+        now = 'subscribed' if fid in subs else 'ignored' if fid in ign else 'new'
         if now == 'ignored' and not show_ignored:
             hidden += 1; continue
-        tick = state.get(fid, always or fid in subs)
-        if always: tick = True
+        tick = state.get(fid, fid in subs)
         for v in ('TRUE' if tick else 'FALSE', now, e['size'], fid, e['desc']):
             print(v)
     sys.stderr.write(str(hidden) + '\n')   # how many ignored folders are held back
@@ -397,9 +401,7 @@ elif cmd == 'apply':
     for r in read_selections(sel_path):
         fid, desc = r['id'], r['desc']
         if fid == ALWAYS:
-            if not r['tick']:
-                print(f'{ALWAYS} is always kept: it is the list of everything available.')
-            continue
+            continue   # never listed, but never act on it either
         try:
             if r['tick']:
                 if fid in subs:
@@ -442,22 +444,24 @@ while true; do
     # The extra button only while there is something for it to show.
     IGNORED_BUTTON=()
     if [ "$SHOW_IGNORED" = 0 ] && [ "$HIDDEN" -gt 0 ]; then
-        IGNORED_BUTTON=(--button="Also display ignored folders":12)
+        IGNORED_BUTTON=(--button="Also display ignored folders":14)
     fi
 
-    # Buttons: Select All 10, Clear All 11, Also display ignored 12 - each
+    # Buttons: Select All 10, Clear All 12, Also display ignored 14 - each
     # redraws the list keeping the ticks made so far - Apply 0, Cancel 1.
+    # The numbers must be EVEN: yad prints the list only for even exit codes,
+    # so an odd one (Clear All was 11) loses the ticks and does nothing.
     set +e
     yad --list \
         --title="LangTechDepot - Available Folders" \
-        --text="Check (+) the folders you want to sync. <span foreground='white' background='red'><b> NOTE: All unchecked folders will be IGNORED (-) </b></span>" \
+        --text="Check (+) the folders you want to sync. <span foreground='white' background='red'><b> NOTE: All unchecked folders will be IGNORED (-) </b></span>\n(The list of everything available, $AUTO_FOLDER_ID, is always kept.)" \
         --column="Subscribe (+):CHK" \
         --column="Now" \
         --column="Size" \
         --column="Folder ID" \
         --column="Description" \
         --button="Select All":10 \
-        --button="Clear All":11 \
+        --button="Clear All":12 \
         "${IGNORED_BUTTON[@]}" \
         --button="Apply":0 \
         --button="Cancel":1 \
@@ -469,8 +473,8 @@ while true; do
 
     case "$EXIT_CODE" in
         10) picker state "$SELECTIONS_FILE" all  "$PICK_STATE" ;;
-        11) picker state "$SELECTIONS_FILE" none "$PICK_STATE" ;;
-        12) picker state "$SELECTIONS_FILE" keep "$PICK_STATE"; SHOW_IGNORED=1 ;;
+        12) picker state "$SELECTIONS_FILE" none "$PICK_STATE" ;;
+        14) picker state "$SELECTIONS_FILE" keep "$PICK_STATE"; SHOW_IGNORED=1 ;;
         0)  break ;;
         *)  echo "Operation cancelled."; exit 0 ;;
     esac
@@ -488,4 +492,4 @@ echo "To add more folders later, or take back one you ignored,"
 echo "just run this installer again. In the folder list, click"
 echo "'Also display ignored folders' to see the ones you ignored."
 echo " "
-echo "If you ever need to manage Syncthing directly, open $GUI_URL."
+echo "If you ever need to manage Syncthing directly, open $GUI_PAGE."
