@@ -76,9 +76,6 @@ CONFIG_DIR="$STATE_HOME/langtechdepot"
 # ("unknown flag --no-default-folder") and nothing is left to suppress.
 [ -f "$CONFIG_DIR/config.xml" ] || "$BIN" generate --home "$CONFIG_DIR" >/dev/null
 
-# Syncthing API connection details (adjust GUI_URL and API_KEY if needed)
-GUI_URL="http://127.0.0.1:8384"
-API_KEY=$(xmlstarlet sel -t -v "//configuration/gui/apikey" "$HOME/.config/syncthing/config.xml" 2>/dev/null || echo "")
 SERVER_NAME="LangTechDepot Server"
 SERVER_ID=""
 
@@ -253,257 +250,242 @@ echo 'The folder catalog will appear within a minute or two.'
 echo " "
 sleep 4
 
-# Now to display the folders available, with checkboxes.
-# Clicking a checkbox will subscribe to that folder, while
-# leaving one unchecked will ignore that folder.
-# (Ignored folders can be unignored later, using the SyncThing GUI.)
-
+# -----------------------------------------------------------------------------
+# Wait for the catalog, then show the folder list
+# -----------------------------------------------------------------------------
+# Not forever: a first sync that stalls (firewall, captive portal, server
+# down) used to hang here silently. Same limit and advice as Windows.
 echo "Waiting for catalog file to sync from server..."
+CATALOG_WAITED=0
 while [ ! -s "$CATALOG_FILE" ]; do
     sleep 2
+    CATALOG_WAITED=$((CATALOG_WAITED + 2))
+    if [ "$CATALOG_WAITED" -ge 180 ]; then
+        echo
+        echo "Still waiting for the folder catalog after 180 seconds."
+        echo "Syncthing is running, but hasn't finished syncing $AUTO_FOLDER_ID from the server yet."
+        echo "Open $GUI_URL and check the Folders list and any red or yellow notices there."
+        echo "Syncthing will keep running in the background - once $AUTO_FOLDER_ID shows"
+        echo "'Up to Date' there, just run this installer again to pick your folders."
+        exit 1
+    fi
 done
 
-# Temp files for YAD interaction
+# One Python helper does the list's bookkeeping; the shell only drives yad.
+#   rows   STATE SHOW_IGNORED     -> yad input: tick, Now, Size, ID, Description
+#   state  SELECTIONS MODE        -> STATE file from yad's --print-all output;
+#                                    MODE keep | all | none
+#   apply  SELECTIONS DATA_ROOT   -> subscribe / ignore / un-ignore in Syncthing
+# Rules, the same as the Windows installer:
+#  - The list opens as things are: subscribed folders ticked. (It used to open
+#    all unticked, and unticked means ignore, so a re-run plus Apply dropped
+#    every folder the user had.)
+#  - All_Contents_List is always listed and ticked; the installer needs it.
+#    "Clear All" leaves it ticked, and an untick is not acted on.
+#  - Ignored folders are held back until "Also display ignored folders";
+#    ticking one then un-ignores it. Folders never shown are left alone.
+#  - Ignoring changes only the server device's ignoredFolders field (PATCH),
+#    not the whole device object (GET + PUT), so a concurrent change to the
+#    device cannot be overwritten.
+PICKER_PY=$(cat <<'PY'
+import json, re, sys, urllib.request, urllib.error, datetime
+
+def api(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(GUI + path, data=data, method=method,
+                                 headers={'X-API-Key': KEY, 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req) as r:
+        raw = r.read()
+        return json.loads(raw) if raw.strip() else None
+
+def subscribed():
+    return {f['id'] for f in (api('GET', '/rest/config/folders') or []) if f.get('id')}
+
+def ignored_list():
+    dev = api('GET', '/rest/config/devices/' + SERVER) or {}
+    return [i for i in (dev.get('ignoredFolders') or []) if isinstance(i, dict) and i.get('id')]
+
+def catalog():
+    out, inside = [], False
+    with open(CATALOG, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            line = line.strip()
+            if 'Folders available, with their sizes' in line:
+                inside = True; continue
+            if 'Individual files available' in line:
+                break
+            if not inside or not line:
+                continue
+            m = re.match(r'^\s*(\S+)\s+(\S+?)\s*"(.*)"\s*$', line)
+            if m:
+                out.append({'size': m.group(1), 'id': m.group(2), 'desc': m.group(3)})
+    if not any(e['id'] == ALWAYS for e in out):
+        out.insert(0, {'size': '', 'id': ALWAYS, 'desc': 'A list of all files available'})
+    return out
+
+def read_state(path):
+    st = {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                fid, _, val = line.rstrip('\n').partition(' ')
+                if fid: st[fid] = (val == 'TRUE')
+    except FileNotFoundError:
+        pass
+    return st
+
+def read_selections(path):
+    rows = []
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            parts = line.rstrip('\n').split('|')
+            if len(parts) >= 5 and parts[3]:
+                rows.append({'tick': parts[0].upper() == 'TRUE', 'now': parts[1], 'id': parts[3], 'desc': parts[4]})
+    return rows
+
+cmd = sys.argv[1]
+GUI, KEY, SERVER, CATALOG, ALWAYS = sys.argv[2:7]
+args = sys.argv[7:]
+
+if cmd == 'rows':
+    state_path, show_ignored = args[0], args[1] == '1'
+    state = read_state(state_path)
+    subs = subscribed()
+    ign = {i['id'] for i in ignored_list()}
+    hidden = 0
+    for e in catalog():
+        fid = e['id']
+        always = fid == ALWAYS
+        now = 'subscribed' if (always or fid in subs) else 'ignored' if fid in ign else 'new'
+        if now == 'ignored' and not show_ignored:
+            hidden += 1; continue
+        tick = state.get(fid, always or fid in subs)
+        if always: tick = True
+        for v in ('TRUE' if tick else 'FALSE', now, e['size'], fid, e['desc']):
+            print(v)
+    sys.stderr.write(str(hidden) + '\n')   # how many ignored folders are held back
+
+elif cmd == 'state':
+    sel_path, mode, state_path = args[0], args[1], args[2]
+    state = read_state(state_path)
+    for r in read_selections(sel_path):
+        t = r['tick'] if mode == 'keep' else (mode == 'all')
+        state[r['id']] = True if r['id'] == ALWAYS else t
+    with open(state_path, 'w', encoding='utf-8') as f:
+        for fid, t in state.items():
+            f.write(f"{fid} {'TRUE' if t else 'FALSE'}\n")
+
+elif cmd == 'apply':
+    sel_path, data_root = args[0], args[1]
+    try:
+        subs = subscribed()
+    except Exception as e:
+        print(f'Warning: could not fetch the active folders list: {e}'); subs = set()
+    failures = 0
+    def set_ignored(fid, label, ignore):
+        cur = ignored_list()
+        has = any(i['id'] == fid for i in cur)
+        if ignore and not has:
+            now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            cur.append({'id': fid, 'label': label, 'time': now})
+        elif not ignore and has:
+            cur = [i for i in cur if i['id'] != fid]
+        else:
+            return False
+        api('PATCH', '/rest/config/devices/' + SERVER, {'ignoredFolders': cur})
+        return True
+    for r in read_selections(sel_path):
+        fid, desc = r['id'], r['desc']
+        if fid == ALWAYS:
+            if not r['tick']:
+                print(f'{ALWAYS} is always kept: it is the list of everything available.')
+            continue
+        try:
+            if r['tick']:
+                if fid in subs:
+                    print(f'Already subscribed to: {fid}')
+                else:
+                    api('POST', '/rest/config/folders', {
+                        'id': fid, 'label': desc, 'path': f'{data_root}/{fid}',
+                        'type': 'receiveonly', 'rescanIntervalS': 3600, 'fsWatcherEnabled': True,
+                        'devices': [{'deviceID': SERVER, 'encryptionPassword': ''}]})
+                    print(f'Successfully subscribed to: {fid}')
+                if set_ignored(fid, desc, False):
+                    print(f'No longer ignoring: {fid}')
+            else:
+                if fid in subs:
+                    api('DELETE', '/rest/config/folders/' + fid)
+                    print(f'Removed active subscription for: {fid}')
+                if set_ignored(fid, desc, True):
+                    print(f'Successfully ignored folder via API: {fid}')
+                else:
+                    print(f'Folder already marked as ignored: {fid}')
+        except Exception as e:
+            failures += 1
+            print(f'Failed to update {fid}: {e}')
+    sys.exit(1 if failures else 0)
+PY
+)
+picker() { python3 -c "$PICKER_PY" "$1" "$GUI_URL" "$API_KEY" "$SERVER_ID" "$CATALOG_FILE" "$AUTO_FOLDER_ID" "${@:2}"; }
+
 YAD_TEMP_INPUT=$(mktemp)
 SELECTIONS_FILE=$(mktemp)
-
-# Default starting state for checkboxes
-DEFAULT_CHECK="FALSE"
+PICK_STATE=$(mktemp)
+HIDDEN_COUNT_FILE=$(mktemp)
+trap 'rm -f "$YAD_TEMP_INPUT" "$SELECTIONS_FILE" "$PICK_STATE" "$HIDDEN_COUNT_FILE"' EXIT
+SHOW_IGNORED=0
 
 while true; do
-    # Filters out header/footer text, blank lines, and previously ignored folders
-    # Extract folder lines using Python based on current DEFAULT_CHECK value
-    # Generates EXACTLY 4 items per folder row for YAD
-    python3 -c "
-import re, sys, json, urllib.request
+    picker rows "$PICK_STATE" "$SHOW_IGNORED" > "$YAD_TEMP_INPUT" 2> "$HIDDEN_COUNT_FILE"
+    HIDDEN=$(tr -dc '0-9' < "$HIDDEN_COUNT_FILE"); HIDDEN=${HIDDEN:-0}
 
-catalog_path = sys.argv[1]
-gui_url = sys.argv[2]
-api_key = sys.argv[3]
-server_id = sys.argv[4]
-default_check = sys.argv[5]
-
-# Fetch Syncthing's live ignored folders straight from the running instance
-ignored = set()
-try:
-    # Fetch device configuration for the remote server
-    req = urllib.request.Request(
-        f'{gui_url}/rest/config/devices/{server_id}',
-        headers={'X-API-Key': api_key}
-    )
-    with urllib.request.urlopen(req) as resp:
-        dev_cfg = json.loads(resp.read().decode('utf-8'))
-        for item in dev_cfg.get('ignoredFolders', []):
-            if isinstance(item, dict) and 'id' in item:
-                ignored.add(item['id'])
-except Exception:
-    pass
-
-in_folders_section = False
-
-with open(catalog_path, 'r') as f:
-    for line in f:
-        line = line.strip()
-
-        if 'Folders available, with their sizes' in line:
-            in_folders_section = True
-            continue
-
-        if 'Individual files available' in line:
-            break
-
-        if not in_folders_section or not line:
-            continue
-
-        # Match Size, Folder_ID, and Description in double quotes
-        match = re.match(r'^\s*(\S+)\s+(\S+)\s+\"(.*)\"\s*$', line)
-        if match:
-            size, fid, desc = match.groups()
-            # Only display folders that are NOT currently in Syncthing's live ignore list
-            if fid not in ignored:
-                print(default_check) # Emits current default (TRUE or FALSE)
-                print(size)          # Size column
-                print(fid)           # Folder ID column
-                print(desc)          # Description column
-" "$CATALOG_FILE" "$GUI_URL" "$API_KEY" "$SERVER_ID" "$DEFAULT_CHECK" > "$YAD_TEMP_INPUT"
-
-    if [ ! -s "$YAD_TEMP_INPUT" ]; then
-        echo "No new folders available to display."
-        rm -f "$YAD_TEMP_INPUT" "$SELECTIONS_FILE"
-        exit 0
+    # The extra button only while there is something for it to show.
+    IGNORED_BUTTON=()
+    if [ "$SHOW_IGNORED" = 0 ] && [ "$HIDDEN" -gt 0 ]; then
+        IGNORED_BUTTON=(--button="Also display ignored folders":12)
     fi
 
-    # Display YAD table with custom action buttons
-    # --button="Select All":10  (Flips state to TRUE and re-renders)
-    # --button="Clear All":11   (Flips state to FALSE and re-renders)
-    # --button="Apply":0       (Exits loop and proceeds with selections)
-    # --button="Cancel":1      (Cancels operation)
+    # Buttons: Select All 10, Clear All 11, Also display ignored 12 - each
+    # redraws the list keeping the ticks made so far - Apply 0, Cancel 1.
     set +e
     yad --list \
         --title="LangTechDepot - Available Folders" \
         --text="Check (+) the folders you want to sync. <span foreground='white' background='red'><b> NOTE: All unchecked folders will be IGNORED (-) </b></span>" \
         --column="Subscribe (+):CHK" \
+        --column="Now" \
         --column="Size" \
         --column="Folder ID" \
         --column="Description" \
         --button="Select All":10 \
         --button="Clear All":11 \
+        "${IGNORED_BUTTON[@]}" \
         --button="Apply":0 \
         --button="Cancel":1 \
-        --width=780 --height=450 \
+        --width=820 --height=450 \
         --separator="|" \
         --print-all < "$YAD_TEMP_INPUT" > "$SELECTIONS_FILE"
     EXIT_CODE=$?
     set -e
 
-    if [ "$EXIT_CODE" -eq 10 ]; then
-        DEFAULT_CHECK="TRUE"
-    elif [ "$EXIT_CODE" -eq 11 ]; then
-        DEFAULT_CHECK="FALSE"
-    elif [ "$EXIT_CODE" -eq 0 ]; then
-        # User clicked Apply: break out of the loop and process $SELECTIONS_FILE
-        break
-    else
-        rm -f "$YAD_TEMP_INPUT" "$SELECTIONS_FILE"
-        echo "Operation cancelled."
-        exit 0
-    fi
+    case "$EXIT_CODE" in
+        10) picker state "$SELECTIONS_FILE" all  "$PICK_STATE" ;;
+        11) picker state "$SELECTIONS_FILE" none "$PICK_STATE" ;;
+        12) picker state "$SELECTIONS_FILE" keep "$PICK_STATE"; SHOW_IGNORED=1 ;;
+        0)  break ;;
+        *)  echo "Operation cancelled."; exit 0 ;;
+    esac
 done
 
-rm -f "$YAD_TEMP_INPUT"
-
-# If output file is empty for any reason, exit cleanly
 if [ ! -s "$SELECTIONS_FILE" ]; then
-    rm -f "$SELECTIONS_FILE"
     echo "Operation cancelled."
     exit 0
 fi
 
-# Process choices: Checked = Subscribe, Unchecked = Ignore
-python3 -c "
-import sys, json, urllib.request, datetime
-
-selections_file = sys.argv[1]
-data_root = sys.argv[2]
-server_id = sys.argv[3]
-gui_url = sys.argv[4]
-api_key = sys.argv[5]
-
-with open(selections_file, 'r') as f:
-    lines = [line.strip() for line in f if line.strip()]
-
-# Fetch current folders already configured in Syncthing
-existing_folders = set()
-try:
-    req = urllib.request.Request(f'{gui_url}/rest/config/folders', headers={'X-API-Key': api_key})
-    with urllib.request.urlopen(req) as resp:
-        folders_cfg = json.loads(resp.read().decode('utf-8'))
-        for fld in folders_cfg:
-            if isinstance(fld, dict) and 'id' in fld:
-                existing_folders.add(fld['id'])
-except Exception as e:
-    print(f'Warning: Could not fetch active folders list: {e}')
-
-for line in lines:
-    parts = line.split('|')
-    if len(parts) >= 4:
-        sub_check = parts[0].upper()
-        size = parts[1]
-        fid = parts[2]
-        desc = parts[3]
-
-        # -------------------------------------------------------------
-        # 1. SUBSCRIBE (+): Replicates clicking 'Add' in the Web GUI
-        # -------------------------------------------------------------
-        if sub_check == 'TRUE':
-            folder_path = f'{data_root}/{fid}'
-            folder_payload = json.dumps({
-                'id': fid,
-                'label': desc,
-                'path': folder_path,
-                'type': 'receiveonly',
-                'rescanIntervalS': 3600,
-                'fsWatcherEnabled': True,
-                'devices': [{'deviceID': server_id}]
-            }).encode('utf-8')
-
-            req = urllib.request.Request(
-                f'{gui_url}/rest/config/folders',
-                data=folder_payload,
-                headers={'X-API-Key': api_key, 'Content-Type': 'application/json'},
-                method='POST'
-            )
-            try:
-                urllib.request.urlopen(req)
-                print(f'Successfully subscribed to: {fid}')
-            except Exception as e:
-                print(f'Failed to subscribe to {fid}: {e}')
-
-        # -------------------------------------------------------------
-        # 2. IGNORE (-): Attach ignoredFolder to the remote device object
-        # -------------------------------------------------------------
-        else:
-            # Step A: If folder was previously added, delete it from Syncthing
-            if fid in existing_folders:
-                del_req = urllib.request.Request(
-                    f'{gui_url}/rest/config/folders/{fid}',
-                    headers={'X-API-Key': api_key},
-                    method='DELETE'
-                )
-                try:
-                    urllib.request.urlopen(del_req)
-                    print(f'Removed active subscription for: {fid}')
-                except Exception as e:
-                    print(f'Warning: Could not remove active folder {fid}: {e}')
-
-            # Step B: Add folder ID to server device's ignoredFolders array
-            try:
-                dev_req = urllib.request.Request(
-                    f'{gui_url}/rest/config/devices/{server_id}',
-                    headers={'X-API-Key': api_key}
-                )
-                with urllib.request.urlopen(dev_req) as resp:
-                    dev_config = json.loads(resp.read().decode('utf-8'))
-
-                cur_ignores = dev_config.get('ignoredFolders', [])
-                already_exists = any(
-                    item.get('id') == fid for item in cur_ignores if isinstance(item, dict)
-                )
-
-                if not already_exists:
-                    now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-                    cur_ignores.append({
-                        'id': fid,
-                        'label': desc,
-                        'time': now_str
-                    })
-
-                    dev_config['ignoredFolders'] = cur_ignores
-
-                    put_req = urllib.request.Request(
-                        f'{gui_url}/rest/config/devices/{server_id}',
-                        data=json.dumps(dev_config).encode('utf-8'),
-                        headers={'X-API-Key': api_key, 'Content-Type': 'application/json'},
-                        method='PUT'
-                    )
-                    urllib.request.urlopen(put_req)
-                    print(f'Successfully ignored folder via API: {fid}')
-                else:
-                    print(f'Folder already marked as ignored: {fid}')
-
-            except Exception as e:
-                print(f'Warning: Could not ignore {fid} via API: {e}')
-" "$SELECTIONS_FILE" "$DATA_ROOT" "$SERVER_ID" "$GUI_URL" "$API_KEY"
-
-rm -f "$SELECTIONS_FILE"
+picker apply "$SELECTIONS_FILE" "$DATA_ROOT" || echo "Some changes failed - see above."
 
 echo " "
-echo "If you later need to manage the SyncThing system directly,"
-echo "open $GUI_URL."
-echo "Then if you want to unignore a folder,"
-echo "open the Actions menu at the top-right, click Settings"
-echo "and then Ignored Folders."
-echo "Then you can click Add on any additional folders you want."
-
-# echo 'or run: ./langtechdepot-subscribe.sh            (list what is on offer)'
-# echo '        ./langtechdepot-subscribe.sh <folder>   (subscribe to one)'
+echo "To add more folders later, or take back one you ignored,"
+echo "just run this installer again. In the folder list, click"
+echo "'Also display ignored folders' to see the ones you ignored."
+echo " "
+echo "If you ever need to manage Syncthing directly, open $GUI_URL."
