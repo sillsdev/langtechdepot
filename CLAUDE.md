@@ -177,9 +177,11 @@ only stops the reconciler from re-adding it.
   location is how the Linux installer used to die. Pinning also gives the depot its own
   Syncthing instance instead of borrowing the user's personal one, which matters because
   registration PATCHes `defaults/folder` to receive-only and would otherwise rewrite
-  *their* defaults. On Linux, don't hardcode the GUI port either — read `gui/address`;
-  first start probes for a free one. The Windows installer pins 8384 in the fresh config
-  on purpose (see below).
+  *their* defaults. Don't hardcode the GUI port either — read `gui/address` back from
+  our `config.xml`. Linux takes whatever first start probed; Windows asks for 8384 so
+  the usual address holds, and moves to a free port when something else has it.
+  Likewise on Windows, "is Syncthing running?" means *our* process (matched on its
+  `--home`), never any `syncthing.exe`: a user may run their own.
 - **Never load `config.xml` with `[xml](Get-Content ...)`.** Use
   `$x = New-Object System.Xml.XmlDocument; $x.PreserveWhitespace = $true; $x.Load($path)`.
   Without `PreserveWhitespace`, `$x.Save()` re-indents the whole file and splits every
@@ -205,7 +207,7 @@ only stops the reconciler from re-adding it.
   before 1.1 kept the folders directly in the home folder; the installer leaves those
   as they are (no `Assets` item). Not Downloads (gets cleaned out, and a startup program there looks like
   malware), not Documents/Desktop (often OneDrive-synced, so gigabytes would upload).
-- **People are told `localhost:8384`; the script uses `127.0.0.1:8384`.** Syncthing
+- **People are told `localhost:<port>`; the script uses `127.0.0.1:<port>`.** Syncthing
   is bound to 127.0.0.1; "localhost" may resolve to `::1` first. Browsers fall back,
   `Invoke-RestMethod` callers shouldn't have to. `$GUI_PAGE` is for messages and
   shortcuts, `$GUI_URL` for API calls.
