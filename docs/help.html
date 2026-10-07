@@ -24,7 +24,7 @@
   <p class="lede">Almost everything that goes wrong is one of the things below.
   Find yours, or skip to <a href="#ask">asking a person</a>.</p>
 
-  <h2>It says my token is invalid or already used</h2>
+  <h2>It says registration failed, the token is unknown, or it has already been used</h2>
   <p>A token works <strong>once, on one machine</strong>. If you have already
   run the installer successfully on this computer, you are done &mdash; there
   is nothing more to do. For a second computer, or after a reinstall,
@@ -72,11 +72,13 @@
   <h2>The list of folders never appears</h2>
   <p>The installer waits for the list to arrive from the depot before it can
   show it, so give it two or three minutes. If it still does not come, open
-  the Syncthing page at <code>localhost:8384</code> and look at <strong>Remote
+  the Syncthing page at <code>localhost:8384</code> (on Linux, use the address
+  the installer printed at the end) and look at <strong>Remote
   Devices</strong> on the right. If the depot is listed but disconnected, this
   machine cannot reach the server &mdash; usually a firewall or a captive
   portal. If it is not listed at all, registration did not complete: run the
-  installer again with a fresh token.</p>
+  installer again. The same token still works, because it was never
+  accepted.</p>
   <p>On Linux, if the terminal says the computer is <strong>missing
   yad</strong>, the installer stopped before doing anything: it needs
   <code>yad</code> to show the folder window. Whoever looks after the machine
@@ -98,7 +100,8 @@
   <h2>Can I run it again?</h2>
   <p>Yes. The installer is safe to run as many times as you like &mdash; it
   checks what is already in place rather than redoing it. You only need a new
-  token if the machine was never registered successfully.</p>
+  token for a different computer, or if LangTechDepot&rsquo;s settings on
+  this one were wiped.</p>
 
   <h2>Can I copy the files to another machine on a memory stick?</h2>
   <p>Yes. What lands on your disk is ordinary files and folders, not a special
@@ -107,16 +110,17 @@
   over the long link.</p>
 
   <h2 id="ask">Asking a person</h2>
-  <p>Reply to the email your token arrived in &mdash; it reaches the people who
+  <p>Write to <a href="mailto:depot@langtech.cloud">depot@langtech.cloud</a>,
+  or reply to the email your token arrived in &mdash; both reach the people who
   run the depot. Two things make a fast answer much more likely:</p>
   <ul>
     <li>whether you are on Windows or Linux, and</li>
     <li>the exact text of any error, copied from the window rather than
     described. A photo of the screen is fine too.</li>
   </ul>
-  <!-- Maintainers: if a monitored support address exists, put it here in
-       place of "reply to the email". The register.py ADMIN_EMAIL is the
-       address the token mail comes from. -->
+  <!-- Maintainers: depot@langtech.cloud is the monitored mailbox (#15). In
+       register.env, MAIL_FROM is the sender of token mail, so replies land
+       there; ADMIN_EMAIL is who is told about each registration. -->
 
   <p class="foot"><a href="index.html">&larr; Back to the start</a> &middot;
   <a href="windows.html">Windows steps</a> &middot;

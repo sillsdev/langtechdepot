@@ -1,9 +1,8 @@
 #!/bin/sh
 #
-# ltd-sync-admin -- Runs python script registry.py to control our syncing.
+# ltd-sync-admin -- Runs `register.py admin` (with sudo) to control our syncing.
 #
-# No need to run this as root, provided the admin person
-# is a member of the group "syncthing"
+# Run it as yourself; it calls sudo, so you need sudo rights on this box.
 #
 # The "$@" will add any arguments to the register.py command's args.
 #

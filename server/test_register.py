@@ -93,12 +93,12 @@ def check(name, cond, extra=""):
 
 # form renders
 code, body = get(B + "/")
-check("GET / serves form", code == 200 and "Send me a token" in body)
+check("GET / serves form", code == 200 and "Get my token" in body)
 
 # ...and under its own name, which is what survives the instructions site
 # eventually taking over "/" on this host.
 code, body = get(B + "/signup?os=windows")
-check("GET /signup serves the same form", code == 200 and "Send me a token" in body)
+check("GET /signup serves the same form", code == 200 and "Get my token" in body)
 check("platform carried into the form", 'name="os" value="windows"' in body
       or "name=os value=\"windows\"" in body)
 

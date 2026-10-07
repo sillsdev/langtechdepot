@@ -177,7 +177,9 @@ only stops the reconciler from re-adding it.
   location is how the Linux installer used to die. Pinning also gives the depot its own
   Syncthing instance instead of borrowing the user's personal one, which matters because
   registration PATCHes `defaults/folder` to receive-only and would otherwise rewrite
-  *their* defaults. Don't hardcode the GUI port either: first start probes for a free one.
+  *their* defaults. On Linux, don't hardcode the GUI port either — read `gui/address`;
+  first start probes for a free one. The Windows installer pins 8384 in the fresh config
+  on purpose (see below).
 - **Never load `config.xml` with `[xml](Get-Content ...)`.** Use
   `$x = New-Object System.Xml.XmlDocument; $x.PreserveWhitespace = $true; $x.Load($path)`.
   Without `PreserveWhitespace`, `$x.Save()` re-indents the whole file and splits every
@@ -237,13 +239,11 @@ only stops the reconciler from re-adding it.
   Actions*. Without it the workflow runs green and publishes nothing.
 - The token is **shown on the confirmation page**, and is meant to be emailed as well. A
   field user on a slow link who has to go and find a mail client mid-install is one who
-  does not finish, so the page is the delivery and the mail the backup. **But no mail goes
-  out today**: `SMTP_HOST` is empty on the server, so the page is the *only* copy, and
-  `ltd-sync-admin approve` can notify nobody. The sender is to be
-  `depot@langtech.cloud` (already in `register.env.example`), a Zoho mailbox that does not
-  exist yet — see #15 and the comments on #24. `docs/help.html` still says "reply to the
-  email your token arrived in"; fix that line, `MAIL_FROM` and the SMTP settings together
-  once the mailbox is live.
+  does not finish, so the page is the delivery and the mail the backup. Mail goes out
+  from `depot@langtech.cloud` (Zoho, `smtppro.zoho.com`), which is also the support
+  address `docs/help.html` gives and is read in Thunderbird. If SMTP fails, the page
+  says it is the only copy — keep that fallback. `register.env.example` ships with
+  `SMTP_PASS` blank; copied as-is, every sign-up waits on a failing login.
 - **The Linux picker needs `yad`.** The installer checks for it first and exits 1
   before registering. Keep that check above the token prompt: when the dialog fails
   later, the script reports "Operation cancelled." and exits 0, with a token spent and

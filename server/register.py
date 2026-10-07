@@ -437,8 +437,9 @@ def next_step_url(osname: str) -> str:
 
 def form_page(osname: str) -> str:
     return f"""<h1>Get your token</h1>
-<p class=lede>One short form. We email you a token &mdash; a password that works
-once, on one machine &mdash; and you paste it into the installer.</p>
+<p class=lede>One short form. The next page gives you a token &mdash; a password
+that works once, on one machine &mdash; and we email you a copy. You paste it
+into the installer.</p>
 {RAIL_FORM}
 <form method=post action=/request class=card>
  <input type=hidden name=os value="{html.escape(osname)}">
@@ -448,7 +449,7 @@ once, on one machine &mdash; and you paste it into the installer.</p>
  <input id=org name=org>
  <label for=location>Where you work <span class=opt>&mdash; optional</span></label>
  <input id=location name=location placeholder="country or region">
- <button type=submit>Send me a token</button>
+ <button type=submit>Get my token</button>
 </form>
 <div class=note><strong>Setting up a second machine?</strong>
 Fill this in again. Each machine needs its own token.</div>
@@ -469,8 +470,8 @@ def token_page(token: str, osname: str, email: str, emailed: bool) -> str:
         mail_line = (f"<p>A copy is on its way to <code>{html.escape(email)}</code>, "
                      "which is handy if you are installing on a different machine from this one.</p>")
     else:
-        mail_line = ("<p>We could not send this by email, so this page is the only "
-                     "copy. Copy it before you leave.</p>")
+        mail_line = ("<p>This page is the only copy of your token. Copy it now, "
+                     "before you leave the page.</p>")
     return f"""<h1>Here is your token</h1>
 <p class=lede>It works once, on one machine. Copy it now &mdash; then go back and
 run the installer.</p>
@@ -482,7 +483,7 @@ run the installer.</p>
  </div>
  {mail_line}
 </div>
-<a class="btn big" href="{next_step_url(osname)}">Next: download the installer &rarr;</a>
+<a class="btn big" href="{next_step_url(osname)}">Next: {"open a terminal" if osname == "linux" else "download the installer"} &rarr;</a>
 <span class=sub-btn>Leave this page open until the installer has asked you for
 the token.</span>
 <div class=note><strong>Keep it to yourself.</strong>

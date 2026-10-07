@@ -144,9 +144,10 @@ bash client/install-langtechdepot.sh
 ```
 
 No admin rights on either platform. The installer sets Syncthing to start
-automatically, registers the machine, and opens the web GUI at
-<http://localhost:8384>. Files land under `~/LangTechDepot/` (or
-`%USERPROFILE%\LangTechDepot\`).
+automatically, registers the machine, and shows the folder list. Syncthing's own
+page is at <http://localhost:8384> (on Linux the installer prints the actual
+address, since the port is probed). Files land under `~/LangTechDepot/` (or
+`%USERPROFILE%\LangTechDepot\Assets\`, or wherever the user pointed it).
 
 On Linux,
 `langtechdepot-subscribe.sh` lists the catalog and subscribes by folder ID.
@@ -190,7 +191,11 @@ client/  setup-langtechdepot.ps1     field installer (Windows) - edit this
                                      uses modify-langtechdepot, i.e. the installer)
 server/  SETUP.md                    server standup guide
          register.py                 registration service + admin CLI
+         test_register.py            end-to-end test against a stub Syncthing
+         ltd-sync-admin              sudo wrapper for `register.py admin`
+         token_backup.sh             nightly sqlite .backup, 30-day retention
          langtechdepot-register.service   systemd unit
          register.env.example        configuration template
          Caddyfile.example           TLS front end, and the merge plan
+images/                              screenshots for intent.md
 ```

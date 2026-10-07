@@ -55,7 +55,7 @@ for d in *; do ln -fs /data/LT/.stignore $d/.stignore; done
 So that SyncThing can create `.stfolder` inside the folders to be shared, change the group membership of all the files and folders inside /data/LT/BTSync to *syncthing* with the command
 ```
 cd /data/LT/BTSync
-sudo chgrp -R syncthing .* *
+sudo chgrp -R syncthing -- * .[!.]*   # not .* : on older bash that matches .. too
 ```
 So that you and the user *ltadmin* can make changes in the files to be shared with syncthing, 
 both login accounts need to be listed in the group called *syncthing*, with these commands:
@@ -69,7 +69,7 @@ newgrp syncthing	# start a new shell with your new permissions
 One Syncthing folder per subscription group, pointed at the **existing** repo
 directories (no data migration). For each folder in the GUI:
 
-- **Folder ID**: short stable slug (`software-core`, `training-videos`, ...).
+- **Folder ID**: short stable slug (`Android_apps`, `Win_everything_en`, ...).
   This is what users see and what `modify-langtechdepot` (Windows) and
   `langtechdepot-subscribe` (Linux) take as an argument.
   Never change an ID once published.
@@ -87,8 +87,8 @@ minute.
 
 **`All_Contents_List` must be one of them** (and in `CATALOG_FOLDERS`, if that
 is set). Both installers subscribe to it first and build their folder list
-from the `LangTechDepotFiles.txt` inside it; without it the Linux installer
-waits forever and the Windows one gives up and sends the user to Syncthing's page.
+from the `LangTechDepotFiles.txt` inside it; without it both installers give
+up after three minutes and send the user to Syncthing's page.
 A folder that is missing from that file's *Folders available, with their
 sizes* section never appears in the installers' list at all, however it is
 shared — so a new folder goes live for users when the file is regenerated, not
@@ -100,13 +100,13 @@ This is how field machines join. Nothing else admits a device.
 
 ```bash
 umask 027  # Ensure group read-only access and completely block others
-sudo apt update && sudo apt install -y python3-dotenv
+sudo apt update && sudo apt install -y python3-dotenv sqlite3
 sudo mkdir -p /opt/langtechdepot /etc/langtechdepot
 sudo cp register.py /opt/langtechdepot/
 sudo cp register.env.example /etc/langtechdepot/register.env
 sudo chgrp syncthing !$	  # so register.py can read env
 sudo chmod 640 !$
-sudo $EDITOR !$    # API key, SERVER_ADDRESS, PUBLIC_URL, SMTP
+sudo $EDITOR !$    # API key (Syncthing GUI: Actions > Settings > API Key), SERVER_ADDRESS, SMTP
 
 sudo cp langtechdepot-register.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -114,8 +114,9 @@ sudo systemctl enable --now langtechdepot-register
 journalctl -u langtechdepot-register -f
 ```
 
-Without `SMTP_HOST` the form shows the token on screen instead of mailing it —
-usable, but set SMTP if you want a working address on file for each registrant.
+The form always shows the token on screen and mails a copy from
+`depot@langtech.cloud`. Fill in `SMTP_PASS` (or leave `SMTP_HOST` empty to turn
+mail off) — with a host and no password, every sign-up waits on a failing login.
 Set `AUTO_APPROVE=false` to queue requests for manual approval instead.
 
 Edit the management script, to make sure it has the right folder,
@@ -125,21 +126,21 @@ then enable the script:
 $EDITOR ltd-sync-admin	# check folder of register.py
 chmod ug+x !$
 # Make a symbolic link to it in /usr/local/bin
-ln -s `pwd`/ltd-sync-admin /usr/local/bin/ltd-sync-admin
+sudo ln -s `pwd`/ltd-sync-admin /usr/local/bin/ltd-sync-admin
 ```
 
 So that the clients' tokens can be backed up,
 make sure that the backup script will put them in the right place.
 ``` bash
-$EDITOR token_backup.sh	# check BACKUP_DIR etc
+$EDITOR token_backup.sh	# check BACKUP_DIR; the script uses its own value
 chmod ug+x !$
 # Make a symbolic link to it in /usr/local/bin
-ln -s `pwd`/token_backup.sh /usr/local/bin/token_backup.sh
-BACKUP_DIR=/data/LT/Backup/ClientsHowto	# or wherever you put it
+sudo ln -s `pwd`/token_backup.sh /usr/local/bin/token_backup.sh
+BACKUP_DIR=/data/LT/Backups/ClientsHowto	# must match BACKUP_DIR in the script
 sudo mkdir -p $BACKUP_DIR
-ls -lrt $BACKUP_DIR
-token_backup.sh
-ls -lrt $BACKUP_DIR
+sudo ls -lrt $BACKUP_DIR
+sudo token_backup.sh	# cron runs it as root, so test it as root
+sudo ls -lrt $BACKUP_DIR
 ```
 You should see a new file like register_yyyy-mm-dd_hhmmss.db
 
@@ -157,7 +158,16 @@ sudo crontab -e
 
 The service binds to localhost only. 
 Caddy is easier to manage than apache, so we'll turn off apache and use caddy.
-Caddy terminates TLS and renews the certificate on its own:
+Caddy terminates TLS and renews the certificate on its own.
+
+Stop apache2 first and disable it, so it won't start again after a reboot —
+Caddy cannot take ports 80 and 443 while Apache holds them:
+``` bash
+sudo systemctl stop apache2
+sudo systemctl disable apache2
+```
+
+Then install Caddy:
 
 ```bash
 umask 027  # Ensure group read-only access and completely block others
@@ -173,17 +183,12 @@ as well as sync tokens provided,
 the Caddyfile sets up this arrangement:
 
 depot.langtech.cloud *gives out tokens*
-depot.langtech.cloud/files *displays folders for gettinga single installer*
+depot.langtech.cloud/files *displays folders for getting a single installer*
 
 Requires ports **80 and 443** open and the hostname pointed at this box. Visit
-`https://<hostname>/` — you should get the registration form. Put that URL into
-`REGISTER_URL` at the top of both client installers before publishing them.
-
-Stop apache2 and disable it, so it won't start again after a reboot:
-``` bash
-sudo systemctl stop apache2
-sudo systemctl disable apache2
-```
+`https://<hostname>/` — you should get the registration form. Both client
+installers already carry this URL in `REGISTER_URL`; change it there only if
+the hostname ever changes.
 ## 6. Day-to-day administration
 
 ```bash

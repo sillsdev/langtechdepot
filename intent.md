@@ -45,7 +45,7 @@ An unmet goal is a commitment not yet kept, not an idea nobody had.
 
 The update must not depend on the user remembering to update.
 
-**Today.** Syncthing runs from logon — a per-user Task Scheduler task on Windows, a
+**Today.** Syncthing runs from logon — a shortcut in the user's Startup folder on Windows, a
 per-user systemd unit with lingering on Linux — and keeps accepted folders current
 continuously. This is strictly better than the original "run a script overnight before
 you leave": there is no script to remember and no window to miss.
@@ -56,11 +56,11 @@ The question that matters on the night before you leave — *"am I ready to leav
 
 But how did you know to do that? When you installed the LangTechDepot software, it finished with some messages, including these:
 
-![Installer messages for after installation.jpg](./images/Installer messages for after installation.jpg)
+![Installer messages for after installation](<./images/Installer messages for after installation.jpg>)
 
 Also, whenever you go to the folder `LangTechDepot`, you'll see it there:
 
-![Explorer showing LangTechDepot](./images/Explorer showing LangTechDepot.jpg)
+![Explorer showing LangTechDepot](<./images/Explorer showing Quick Access items.jpg>)
 
 ### G2 — You have the thing you didn't know you'd need
 
@@ -72,17 +72,17 @@ first; it holds `LangTechDepotFiles.txt`, which lists every folder on offer with
 and a short description (such as `Android_apps` — "Apps to install on an Android
 device"), then every file in it. The installer's folder picker is built from that file,
 so the user sees what each folder holds and how big it is before choosing, and can search
-the whole list for the thing they half-remember.
+`LangTechDepotFiles.txt` itself for the thing they half-remember.
 
 **Gap.** The picker starts with every new folder unticked, and an unticked folder is
-*ignored*, not merely skipped — so the default posture at step 4 is now more refined. I want to take the things I might need, not the things a language develpment worker anywhere in the world might need.
+*ignored*, not merely skipped — so the default posture at step 4 is now more refined. I want to take the things I might need, not the things a language development worker anywhere in the world might need.
 
-If I work in a French-speaking country, by coworkers will want Windows programs with the French interface, and we'll want to use the training videos in French. We won't need the equivalents for Russian or Indonesian.
+If I work in a French-speaking country, my coworkers will want Windows programs with the French interface, and we'll want to use the training videos in French. We won't need the equivalents for Russian or Indonesian.
 
 The descriptions also reach only the picker: a folder accepted straight from Syncthing's
 own page shows whatever label the server gives it.
 
-*Actually, the Syncthing GUI doesn't show ignored folders, and if you use the GUI to unignore a folder, it will suggest the label (ie. the terse description), not the folder id. Using the picker's `Show ignored folders` button is the best way to go. JimH44* 
+*Actually, the Syncthing GUI doesn't show ignored folders, and if you use the GUI to unignore a folder, it will suggest the label (i.e. the terse description), not the folder id. Using the picker's `Also display ignored folders` button is the best way to go. JimH44* 
 
 
 ### G3 — It lands where you want it, including a thumb drive
@@ -170,11 +170,11 @@ A user who finds an open-source tool that other language-technology workers woul
 benefit from should be able to say so.
 
 **Today.** Nothing yet. LTUse curates the folder contents. The intended path back to them
-is `depot@langtech.cloud`, which LTUse will watch, advertised on the site — but the
-mailbox does not exist yet (see #15).
+is `depot@langtech.cloud`, which LTUse watches. The help page gives it as the address
+for questions (#15), but nothing yet invites suggestions.
 
-**Gap.** Until it does, nothing on the site, in `register.py`, or in either installer
-accepts a suggestion. This is the only goal here with no implementation at all.
+**Gap.** Nothing on the site, in `register.py`, or in either installer asks for a
+suggestion. This is the only goal here with no implementation at all.
 
 ## What follows from this
 
