@@ -279,16 +279,104 @@ function Repair-CorruptedEmptyXmlFields {
 # CLEAN-UP FOR CONFIGS DAMAGED BY EARLIER VERSIONS OF THIS INSTALLER - END
 # ============================================================================
 
+# Syncthing's command-line arguments for our instance. Start-Process in
+# Windows PowerShell joins an argument array with spaces and no quoting, so a
+# profile path with a space in it (C:\Users\Ana Silva\...) would split in two;
+# the path is quoted here by hand instead.
+$HomeArg  = "--home `"$CONFIG_DIR`""
+# --no-console hides the console window Syncthing would otherwise keep open
+# (on Windows 11 24H2 and later Syncthing hides it anyway). Without it, the
+# Startup shortcut leaves a console on the taskbar at every logon, and
+# closing that window stops syncing.
+$ServeArgs = "serve --no-browser --no-console $HomeArg"
+
 # Generate config.xml if it does not exist. "generate" has no flag to set the
 # GUI address directly (that only exists on "serve" and "cli"), so the
 # address is patched into the freshly written config.xml afterward instead -
-# pinning it to the standard port (8384) rather than leaving whatever
-# Syncthing chose on its own, which on a fresh install can be a random port.
+# the standard port (8384), or, when something else already listens there,
+# a free one (see "Which port our Syncthing's page is on" below).
 $configFile = "$CONFIG_DIR\config.xml"
-$isFreshInstall = -not (Test-Path $configFile)
-if ($isFreshInstall) {
-    Start-Process -FilePath $BIN -ArgumentList "generate", "--home", $CONFIG_DIR -NoNewWindow -Wait
+if (-not (Test-Path $configFile)) {
+    Start-Process -FilePath $BIN -ArgumentList "generate $HomeArg" -NoNewWindow -Wait
     Set-XmlNodeText -path $configFile -xpath "//configuration/gui/address" -value "127.0.0.1:8384"
+}
+
+# Our Syncthing, told apart from any other on the machine - the user's own,
+# SyncTrayzor's, another account's - by the --home on its command line.
+# Get-Process -Name syncthing cannot tell them apart. (Syncthing runs as a
+# monitor process plus a child with the same command line; both match.)
+function Get-OurSyncthing {
+    # --home followed by exactly our folder: quoted (this version), or bare
+    # and then a space or the end (earlier versions, which did not quote it).
+    $dir = [regex]::Escape([System.IO.Path]::GetFullPath($CONFIG_DIR).TrimEnd('\'))
+    $homePattern = '(^|\s)--home[\s=]+("' + $dir + '\\?"|' + $dir + '\\?(\s|$))'
+    try {
+        return @(Get-CimInstance -ClassName Win32_Process -Filter "Name='syncthing.exe'" -ErrorAction Stop |
+            Where-Object { $_.CommandLine -and $_.CommandLine -match $homePattern })
+    } catch {
+        # WMI unavailable: fall back to the program's path, which is ours
+        # far more often than not.
+        return @(Get-Process -Name "syncthing" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -ieq $BIN } |
+            ForEach-Object { [PSCustomObject]@{ ProcessId = $_.Id } })
+    }
+}
+
+function Stop-OurSyncthing {
+    foreach ($p in @(Get-OurSyncthing)) {
+        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    # Give Windows a moment to release config.xml and the GUI port.
+    Start-Sleep -Seconds 2
+}
+
+function Start-OurSyncthing {
+    Start-Process -FilePath $BIN -ArgumentList $ServeArgs -WindowStyle Hidden
+    Start-Sleep -Seconds 2
+}
+
+# Which port our Syncthing's page is on. 8384 is Syncthing's usual port, but
+# a Syncthing the user runs for themselves may already hold it, and two
+# cannot share one. So, whenever ours is not running yet, the port in our
+# config.xml is checked first: if something else is listening there, ours
+# moves to 8384 if that is free, or else to any free port. Everything below
+# reads the address back from config.xml rather than assuming 8384.
+function Test-PortInUse {
+    param([int]$Port)
+    # Two checks, because Windows lets a program bind 127.0.0.1:N while
+    # another holds 0.0.0.0:N: first, does anything answer there at all...
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $attempt = $client.BeginConnect([System.Net.IPAddress]::Loopback, $Port, $null, $null)
+        if ($attempt.AsyncWaitHandle.WaitOne(1500) -and $client.Connected) { return $true }
+    } catch {
+    } finally {
+        $client.Close()
+    }
+    # ...and second, could Syncthing take the address itself?
+    try {
+        $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $Port)
+        $listener.ExclusiveAddressUse = $true
+        $listener.Start()
+        $listener.Stop()
+        return $false
+    } catch {
+        return $true
+    }
+}
+
+function Get-FreePort {
+    $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $port = $listener.LocalEndpoint.Port
+    $listener.Stop()
+    return $port
+}
+
+function Get-GuiPort {
+    $addr = [string](Get-XmlNodeText -path $configFile -xpath "//configuration/gui/address")
+    if ($addr -match ':(\d+)$') { return [int]$matches[1] }
+    return 0
 }
 
 # Run Syncthing in the background at logon, via a Startup-folder shortcut.
@@ -303,33 +391,48 @@ if ($isFreshInstall) {
 $startupDir   = [Environment]::GetFolderPath('Startup')
 $shortcutPath = Join-Path $startupDir "LangTechDepot Syncthing.lnk"
 
-if (-not (Test-Path $shortcutPath)) {
+# Rewritten on every run, so a shortcut made by an earlier version picks up
+# the current arguments (--no-console in particular).
+try {
     $wshShell = New-Object -ComObject WScript.Shell
     $shortcut = $wshShell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath       = $BIN
-    $shortcut.Arguments        = "serve --no-browser --home `"$CONFIG_DIR`""
+    $shortcut.Arguments        = $ServeArgs
     $shortcut.WorkingDirectory = $BIN_DIR
-    $shortcut.WindowStyle      = 7   # Minimized - a console app can't be fully hidden via a shortcut
+    $shortcut.WindowStyle      = 7   # Minimized, in case --no-console is ever not honoured
     $shortcut.Description      = "Runs LangTechDepot's Syncthing in the background at logon"
     $shortcut.Save()
+} catch {
+    Write-Host "Note: could not create the Startup shortcut for Syncthing: $_"
 }
 
-# Make sure it's running right now too, not just at the next logon.
-if (-not (Get-Process -Name "syncthing" -ErrorAction SilentlyContinue)) {
-    Start-Process -FilePath $BIN -ArgumentList "serve", "--no-browser", "--home", $CONFIG_DIR -WindowStyle Hidden
-    Start-Sleep -Seconds 2
+# Make sure it's running right now too, not just at the next logon - first
+# moving it off a port something else has taken (see Test-PortInUse above).
+if (@(Get-OurSyncthing).Count -eq 0) {
+    $guiPort = Get-GuiPort
+    if (-not $guiPort -or (Test-PortInUse $guiPort)) {
+        if (-not (Test-PortInUse 8384)) { $guiPort = 8384 } else { $guiPort = Get-FreePort }
+        Set-XmlNodeText -path $configFile -xpath "//configuration/gui/address" -value "127.0.0.1:$guiPort"
+    }
+    Start-OurSyncthing
 }
 
 # Helper functions for REST API
-$API_KEY = Get-XmlNodeText -path $configFile -xpath "//configuration/gui/apikey"
-$GUI_ADDR = "127.0.0.1:8384"
-$GUI_URL = "http://$GUI_ADDR"
+$API_KEY  = Get-XmlNodeText -path $configFile -xpath "//configuration/gui/apikey"
+$GUI_ADDR = [string](Get-XmlNodeText -path $configFile -xpath "//configuration/gui/address")
+$guiHost  = "127.0.0.1"
+$guiPort  = Get-GuiPort
+if ($GUI_ADDR -match '^(.*):\d+$' -and $matches[1] -notin @("", "0.0.0.0", "[::]", "::", "localhost", "127.0.0.1")) {
+    # Someone pointed it at a particular address on purpose; use that.
+    $guiHost = $matches[1]
+}
+$GUI_URL = "http://${guiHost}:$guiPort"
 # The same page, as people are told about it. "localhost" reads as "this
 # computer" to someone who is not a network engineer. Syncthing itself stays
 # bound to 127.0.0.1 and this script talks to it there: "localhost" can mean
 # the IPv6 address ::1 first, where nothing is listening. Browsers quietly
 # fall back to 127.0.0.1, so the friendly name works for people.
-$GUI_PAGE = "http://localhost:8384"
+if ($guiHost -eq "127.0.0.1") { $GUI_PAGE = "http://localhost:$guiPort" } else { $GUI_PAGE = $GUI_URL }
 $SERVER_NAME = "LangTechDepot Server"
 
 function Invoke-SyncthingApi {
@@ -343,8 +446,12 @@ function Invoke-SyncthingApi {
     }
     $uri = "$GUI_URL$Endpoint"
     if ($Body) {
+        # Sent as UTF-8 bytes. Given a string, Windows PowerShell's
+        # Invoke-RestMethod encodes it as ISO-8859-1 unless the content type
+        # names a charset, which mangles any name outside Latin-1.
         $jsonBody = $Body | ConvertTo-Json -Depth 10 -Compress
-        return Invoke-RestMethod -Uri $uri -Method $Method -Headers $headers -Body $jsonBody -ContentType "application/json"
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonBody)
+        return Invoke-RestMethod -Uri $uri -Method $Method -Headers $headers -Body $bytes -ContentType "application/json; charset=utf-8"
     } else {
         return Invoke-RestMethod -Uri $uri -Method $Method -Headers $headers
     }
@@ -362,7 +469,11 @@ for ($i = 0; $i -lt 30; $i++) {
 }
 
 if (-not $connected) {
-    Write-Error "Syncthing did not answer at $GUI_URL within 60s."
+    # Write-Host, not Write-Error: with ErrorActionPreference Stop, Write-Error
+    # would end the script here without the help line.
+    Write-Host "Syncthing did not answer at $GUI_URL within 60 seconds."
+    Write-Host "Restarting the computer and running this again usually fixes it."
+    Write-Host "More help: $HELP_URL"
     Exit-Script -Code 1
 }
 
@@ -415,17 +526,36 @@ if ($SERVER_ID) {
         } | ConvertTo-Json
 
         try {
-            $RESPONSE = Invoke-RestMethod -Uri "$REGISTER_URL/register" -Method "POST" -Body $regBody -ContentType "application/json"
+            # UTF-8 bytes, for the same reason as in Invoke-SyncthingApi: a
+            # string body goes out as ISO-8859-1, and a user or computer name
+            # outside Latin-1 would then never register.
+            $regBytes = [System.Text.Encoding]::UTF8.GetBytes($regBody)
+            $RESPONSE = Invoke-RestMethod -Uri "$REGISTER_URL/register" -Method "POST" -Body $regBytes -ContentType "application/json; charset=utf-8"
             Write-Host ""
             Write-Host "Registered."
             break
         } catch {
             $REASON = "registration failed"
-            if ($_.Exception.Response) {
+            # The server answers an error as {"error": "..."}. Depending on
+            # the response, Windows PowerShell has either read that body into
+            # ErrorDetails.Message already (leaving the stream spent) or left
+            # it in the stream, so both are tried, in that order.
+            $errText = $null
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+                $errText = $_.ErrorDetails.Message
+            } elseif ($_.Exception.Response) {
                 try {
                     $stream = $_.Exception.Response.GetResponseStream()
-                    $reader = [System.IO.StreamReader]::new($stream)
-                    $errObj = $reader.ReadToEnd() | ConvertFrom-Json
+                    if ($stream.CanSeek) { $stream.Position = 0 }
+                    $errText = ([System.IO.StreamReader]::new($stream)).ReadToEnd()
+                } catch {}
+            } elseif ($_.Exception.Message) {
+                # No answer at all: no connection, DNS, a proxy...
+                $REASON = $_.Exception.Message
+            }
+            if ($errText) {
+                try {
+                    $errObj = $errText | ConvertFrom-Json
                     if ($errObj.error) { $REASON = $errObj.error }
                 } catch {}
             }
@@ -508,7 +638,7 @@ if (Test-Path $ModifyBat) { Add-ToUserPath -Dir $BIN_DIR }
 # Which version last ran here, so a later version can tell what it is
 # upgrading from if that ever matters.
 try {
-    Set-Content -Path (Join-Path $CONFIG_DIR "installed-version.txt") -Value $LTD_VERSION
+    [System.IO.File]::WriteAllText((Join-Path $CONFIG_DIR "installed-version.txt"), "$LTD_VERSION`r`n", $Utf8NoBom)
 } catch {}
 
 # -----------------------------------------------------------------------------
@@ -523,9 +653,12 @@ try {
 # picks up that change too, rather than silently overriding it.
 #
 # Syncthing keeps each folder's own path fixed once that folder is created,
-# so this only prompts on a fresh install - picking somewhere different on a
-# later run would only affect brand-new folders and leave existing ones
-# right where they already are.
+# so this only prompts until a place has been chosen - picking somewhere
+# different on a later run would only affect brand-new folders and leave
+# existing ones right where they already are. "Chosen" is read from that
+# same setting, not from whether config.xml existed before this run: a first
+# run that stopped earlier (at the token prompt, say) has a config.xml but
+# never asked, and the next run must ask.
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -546,10 +679,26 @@ $DEFAULT_ASSETS = Join-Path $HOME_BASE "Assets"
 function Test-SamePath {
     param([string]$A, [string]$B)
     if (-not $A -or -not $B) { return $false }
-    return ([System.IO.Path]::GetFullPath($A).TrimEnd('\') -ieq [System.IO.Path]::GetFullPath($B).TrimEnd('\'))
+    try {
+        return ([System.IO.Path]::GetFullPath($A).TrimEnd('\') -ieq [System.IO.Path]::GetFullPath($B).TrimEnd('\'))
+    } catch {
+        return $false   # not a usable path at all
+    }
 }
 
-if ($isFreshInstall) {
+# Syncthing leaves this setting empty in a new config (some versions say "~",
+# the home folder). This script never saves any of those, nor the home folder
+# itself, so each means the question has not been answered yet.
+$savedRoot = [string](Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/defaults/folder").path
+$locationChosen = $savedRoot -and ($savedRoot.Trim() -notin @("~", "~\", "~/")) -and
+    -not (Test-SamePath $savedRoot $HOME)
+
+if ($locationChosen) {
+    $DATA_ROOT = $savedRoot
+} elseif ($CliMode) {
+    # Never a dialog in command-line mode; the usual place it is.
+    $DATA_ROOT = $DEFAULT_ASSETS
+} else {
     $defaultRoot = $DEFAULT_ASSETS
 
     # The chooser opens on the suggested Assets folder itself, so just
@@ -609,6 +758,15 @@ if ($isFreshInstall) {
             # name says what it is.
             $DATA_ROOT = [System.IO.Path]::Combine($picked, "LangTechDepot")
         }
+        # The Assets are always a folder of their own, never the home folder
+        # $HOME_BASE itself (the layout before version 1.1): picking the
+        # user's own profile folder, for one, makes $picked\LangTechDepot,
+        # which is exactly $HOME_BASE.
+        if (Test-SamePath $DATA_ROOT $HOME_BASE) {
+            $DATA_ROOT = $DEFAULT_ASSETS
+            Write-Host "That is where the LangTechDepot folder itself goes, so the Assets will be"
+            Write-Host "kept in the Assets folder inside it: $DATA_ROOT"
+        }
     } else {
         $DATA_ROOT = $defaultRoot
         Write-Host "No folder chosen - using the default location: $DATA_ROOT"
@@ -617,9 +775,6 @@ if ($isFreshInstall) {
         -not (Get-ChildItem -Path $defaultRoot -Force -ErrorAction SilentlyContinue)) {
         Remove-Item -Path $defaultRoot -ErrorAction SilentlyContinue
     }
-} else {
-    $DATA_ROOT = (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/defaults/folder").path
-    if (-not $DATA_ROOT) { $DATA_ROOT = $DEFAULT_ASSETS }
 }
 
 New-Item -ItemType Directory -Force -Path $DATA_ROOT | Out-Null
@@ -778,7 +933,10 @@ if (Test-Path $ModifyBat) {
 
 # Pinned once. A marker naming another folder means an earlier version
 # pinned the synced folders themselves; pin the home folder now instead.
-$pinnedBefore = (Test-Path $PinnedMark) -and ((Get-Content -Raw $PinnedMark) -like "*$HOME_BASE *")
+# Read and written as UTF-8: $HOME_BASE holds the user's name, which
+# Get-Content/Set-Content would pass through the ANSI code page.
+$pinnedBefore = (Test-Path $PinnedMark) -and
+    ([System.IO.File]::ReadAllText($PinnedMark, $Utf8NoBom).Contains("$HOME_BASE "))
 if (-not $pinnedBefore) {
     try {
         $shell = New-Object -ComObject Shell.Application
@@ -790,9 +948,49 @@ if (-not $pinnedBefore) {
             foreach ($it in $quick.Items()) { if (Test-SamePath $it.Path $HOME_BASE) { $listed = $true } }
         }
         if (-not $listed) { $shell.Namespace($HOME_BASE).Self.InvokeVerb("pintohome") }
-        Set-Content -Path $PinnedMark -Value "Pinned $HOME_BASE to Quick access on $(Get-Date -Format s)"
+        [System.IO.File]::WriteAllText($PinnedMark, "Pinned $HOME_BASE to Quick access on $(Get-Date -Format s)`r`n", $Utf8NoBom)
     } catch {
         Write-Host "Note: could not pin $HOME_BASE in File Explorer: $_"
+    }
+}
+
+# Adds or removes one folder ID in the server device's ignoredFolders list.
+# We still GET first because we need the current list to change - but we
+# PATCH just the ignoredFolders field back, rather than PUTting the whole
+# device object. A PUT here would round-trip every other field on the device
+# (addresses, introducer, paused, etc.) through us, and if Syncthing changed
+# any of those between our GET and our PUT (e.g. the user editing something
+# in the GUI at the same time, or Syncthing updating its own connection state)
+# we'd silently clobber that change. PATCH only touches the field we name.
+# Syncthing's PATCH replaces the whole array, so the full new list is sent.
+function Set-FolderIgnored {
+    param([string]$FolderID, [string]$Label, [bool]$Ignore)
+
+    $devConfig = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices/$SERVER_ID"
+    $curIgnores = @($devConfig.ignoredFolders | Where-Object { $_ })
+    $isIgnored = [bool]($curIgnores | Where-Object { $_.id -eq $FolderID })
+
+    if ($Ignore) {
+        if ($isIgnored) { Write-Host "Folder already marked as ignored: $FolderID"; return }
+        $newIgnore = @{
+            id    = $FolderID
+            label = $Label
+            # Invariant culture: the ":" in a .NET format string is the
+            # culture's time separator, which is not ":" everywhere.
+            time  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        }
+        # Array concatenation returns a new array - simpler and safer here
+        # than trying to grow $curIgnores in place.
+        $updated = @($curIgnores) + $newIgnore
+        Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$SERVER_ID" -Body @{ ignoredFolders = $updated } | Out-Null
+        Write-Host "Successfully ignored folder via API: $FolderID"
+    } else {
+        if (-not $isIgnored) { return }
+        # @(...) keeps an empty result an empty array, so the last ignore can
+        # be removed and Syncthing receives [] rather than null.
+        $updated = @($curIgnores | Where-Object { $_.id -ne $FolderID })
+        Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$SERVER_ID" -Body @{ ignoredFolders = $updated } | Out-Null
+        Write-Host "No longer ignoring: $FolderID"
     }
 }
 
@@ -801,34 +999,59 @@ if (-not $pinnedBefore) {
 # -----------------------------------------------------------------------------
 $AUTO_FOLDER_ID   = "All_Contents_List"
 $AUTO_FOLDER_PATH = Join-Path $DATA_ROOT $AUTO_FOLDER_ID
-$CATALOG_FILE     = Join-Path $AUTO_FOLDER_PATH "LangTechDepotFiles.txt"
 
-Write-Chatter "Subscribing to $AUTO_FOLDER_ID, which contains a list"
-Write-Chatter "of all the files available in the Depot"
-Write-Chatter "and the size of each folder you can subscribe to ..."
-Write-Chatter " "
-Wait-ForReader -Seconds 4
-New-Item -ItemType Directory -Force -Path $AUTO_FOLDER_PATH | Out-Null
+# Already subscribed (a re-run): leave the folder exactly as it is. POSTing
+# it again would replace its device list with the server alone, dropping the
+# peers the introducer has added since - the LAN sharing G5 depends on. Its
+# own path is used, too, in case it is not where $DATA_ROOT says.
+$autoFolder = $null
+try {
+    # foreach, not a pipeline: Windows PowerShell can pass a whole JSON array
+    # down a pipeline as one object.
+    foreach ($fld in (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/folders")) {
+        if ($fld.id -eq $AUTO_FOLDER_ID) { $autoFolder = $fld; break }
+    }
+} catch {}
 
-# encryptionPassword IS a valid field on this per-folder device-share entry
-# (unlike the top-level device registry entry above, where it's silently
-# ignored). "" means this device is trusted and gets the files unencrypted,
-# which is Syncthing's default anyway; it is spelled out here for clarity.
-Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
-    id              = $AUTO_FOLDER_ID
-    label           = "All_Contents_List -- a list of all files available"
-    path            = $AUTO_FOLDER_PATH
-    type            = "receiveonly"
-    rescanIntervalS = 3600
-    fsWatcherEnabled = $true
-    devices         = @(@{ deviceID = $SERVER_ID; encryptionPassword = "" })
-} | Out-Null
+if ($autoFolder) {
+    if ($autoFolder.path) { $AUTO_FOLDER_PATH = $autoFolder.path }
+} else {
+    Write-Chatter "Subscribing to $AUTO_FOLDER_ID, which contains a list"
+    Write-Chatter "of all the files available in the Depot"
+    Write-Chatter "and the size of each folder you can subscribe to ..."
+    Write-Chatter " "
+    Wait-ForReader -Seconds 4
+    New-Item -ItemType Directory -Force -Path $AUTO_FOLDER_PATH | Out-Null
 
-Write-Chatter "Sync data root: $DATA_ROOT"
-Write-Chatter "Automatically subscribed to: $AUTO_FOLDER_ID"
-Write-Chatter "The folder catalog will appear within a minute or two."
-Write-Chatter " "
-Wait-ForReader -Seconds 4
+    # encryptionPassword IS a valid field on this per-folder device-share entry
+    # (unlike the top-level device registry entry above, where it's silently
+    # ignored). "" means this device is trusted and gets the files unencrypted,
+    # which is Syncthing's default anyway; it is spelled out here for clarity.
+    Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body @{
+        id              = $AUTO_FOLDER_ID
+        label           = "All_Contents_List -- a list of all files available"
+        path            = $AUTO_FOLDER_PATH
+        type            = "receiveonly"
+        rescanIntervalS = 3600
+        fsWatcherEnabled = $true
+        devices         = @(@{ deviceID = $SERVER_ID; encryptionPassword = "" })
+    } | Out-Null
+
+    Write-Chatter "Sync data root: $DATA_ROOT"
+    Write-Chatter "Automatically subscribed to: $AUTO_FOLDER_ID"
+    Write-Chatter "The folder catalog will appear within a minute or two."
+    Write-Chatter " "
+    Wait-ForReader -Seconds 4
+}
+$CATALOG_FILE = Join-Path $AUTO_FOLDER_PATH "LangTechDepotFiles.txt"
+
+# The catalog folder is never ignored: the installer cannot build its list
+# without it. Older versions let the dialog untick it; undo that here.
+try {
+    Set-FolderIgnored -FolderID $AUTO_FOLDER_ID -Label $AUTO_FOLDER_ID -Ignore $false
+} catch {
+    Write-Host "Note: could not take $AUTO_FOLDER_ID off the ignore list: $_"
+}
 
 if (-not (Test-Path $CATALOG_FILE) -or (Get-Item $CATALOG_FILE).Length -eq 0) {
     Write-Host "Waiting for catalog file to sync from server..."
@@ -861,7 +1084,9 @@ function Get-CatalogEntries {
     param([string]$CatalogPath)
     $entries = [System.Collections.ArrayList]::new()
     $inFolders = $false
-    foreach ($line in (Get-Content $CatalogPath)) {
+    # UTF-8 explicitly: Windows PowerShell's Get-Content would read the
+    # descriptions in the ANSI code page and garble anything non-ASCII.
+    foreach ($line in [System.IO.File]::ReadAllLines($CatalogPath, [System.Text.Encoding]::UTF8)) {
         $line = $line.Trim()
         if ($line -like "*Folders available, with their sizes*") { $inFolders = $true; continue }
         if ($line -like "*Individual files available*") { break }
@@ -902,6 +1127,21 @@ function Get-IgnoredFolderIds {
     return $ids.ToArray()
 }
 
+# A catalog that arrived but lists no folders (cut short, or in a shape the
+# parser does not know) must not look like "Operation cancelled.": that is a
+# problem on the depot's side, and the user needs to hear so.
+$offeredEntries = @(Get-CatalogEntries -CatalogPath $CATALOG_FILE | Where-Object { $_.FolderID -ne $AUTO_FOLDER_ID })
+if ($offeredEntries.Count -eq 0) {
+    Write-Host ""
+    Write-Host "The list of folders arrived, but no folders could be read from it:"
+    Write-Host "    $CATALOG_FILE"
+    Write-Host "This is a problem with the list on the depot, not with your computer."
+    Write-Host "Syncthing keeps running and will fetch a corrected list by itself;"
+    Write-Host "please run this again later. More help: $HELP_URL"
+    if (-not $CliMode -or $Action -eq "list") { Exit-Script -Code 1 }
+    # add/ignore can still act on folders this computer already knows.
+}
+
 # -----------------------------------------------------------------------------
 # GUI Folder Selection Window (.NET Windows Forms DataGridView)
 # -----------------------------------------------------------------------------
@@ -910,9 +1150,10 @@ function Show-FolderSelectionForm {
     param(
         [string]$CatalogPath,
         [string]$ServerID,
-        # Always listed, ticked by default, and left alone by "Clear All" -
-        # the installer needs this folder's catalog file to build this list.
-        [string]$AlwaysShowID
+        # Never listed: the installer needs this folder's catalog file to
+        # build this very list, so it is not the user's to untick (which
+        # would ignore it). Command-line mode refuses to ignore it, too.
+        [string]$CatalogID
     )
 
     # What this device already has, so the list opens showing it as it is.
@@ -928,45 +1169,26 @@ function Show-FolderSelectionForm {
     # the user asks to see them.
     $shownRows  = [System.Collections.ArrayList]::new()
     $hiddenRows = [System.Collections.ArrayList]::new()
-    $sawAlwaysShow = $false
 
     foreach ($entry in @(Get-CatalogEntries -CatalogPath $CatalogPath)) {
         $fid = $entry.FolderID
-        $isAlways = ($fid -eq $AlwaysShowID)
-        if ($isAlways) { $sawAlwaysShow = $true }
+        if ($fid -eq $CatalogID) { continue }
 
-        if ($isAlways -or $subscribed.Contains($fid)) { $status = "subscribed" }
-        elseif ($ignored.Contains($fid))              { $status = "ignored" }
-        else                                          { $status = "new" }
+        if ($subscribed.Contains($fid))  { $status = "subscribed" }
+        elseif ($ignored.Contains($fid)) { $status = "ignored" }
+        else                             { $status = "new" }
 
         $row = [PSCustomObject]@{
-            Subscribe   = ($isAlways -or $subscribed.Contains($fid))
+            Subscribe   = $subscribed.Contains($fid)
             Status      = $status
             Size        = $entry.Size
             FolderID    = $fid
             Description = $entry.Description
         }
-        # The catalog folder is never hidden, even if it was ignored on an
-        # earlier run: the installer subscribes to it again every time.
-        if ($status -eq "ignored" -and -not $isAlways) { $hiddenRows.Add($row) | Out-Null }
-        else                                           { $shownRows.Add($row) | Out-Null }
+        if ($status -eq "ignored") { $hiddenRows.Add($row) | Out-Null }
+        else                       { $shownRows.Add($row) | Out-Null }
     }
-
-    # If the catalog does not list the catalog folder itself, still show it.
-    if ($AlwaysShowID -and -not $sawAlwaysShow) {
-        $shownRows.Insert(0, [PSCustomObject]@{
-            Subscribe   = $true
-            Status      = "subscribed"
-            Size        = ""
-            FolderID    = $AlwaysShowID
-            Description = "A list of all files available"
-        })
-    }
-
-    if ($shownRows.Count -eq 0 -and $hiddenRows.Count -eq 0) {
-        Write-Host "No folders are listed in the catalog yet."
-        return $null
-    }
+    # (An empty catalog never gets this far; see $offeredEntries above.)
 
     # Build UI Window
     $form = New-Object System.Windows.Forms.Form
@@ -1084,13 +1306,8 @@ function Show-FolderSelectionForm {
     $btnClearAll.Text = "Clear All"
     $btnClearAll.Location = [System.Drawing.Point]::new(100, 10)
     $btnClearAll.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
-    # Leaves the catalog folder ticked, so clearing the list to start over
-    # does not also drop the list of what is available. It can still be
-    # unticked by hand.
     $btnClearAll.Add_Click({
-        foreach ($row in $grid.Rows) {
-            if ($row.Cells["FolderID"].Value -ne $AlwaysShowID) { $row.Cells["Subscribe"].Value = $false }
-        }
+        foreach ($row in $grid.Rows) { $row.Cells["Subscribe"].Value = $false }
     })
 
     # Adds the ignored folders to the list in place, rather than reopening the
@@ -1154,6 +1371,7 @@ function Show-FolderSelectionForm {
     $dialogResult = $form.ShowDialog()
 
     if ($dialogResult -ne [System.Windows.Forms.DialogResult]::OK) {
+        $script:FolderFormCancelled = $true
         return $null
     }
 
@@ -1243,10 +1461,16 @@ if ($CliMode) {
         Exit-Script -Code 1
     }
 } else {
-    $selections = Show-FolderSelectionForm -CatalogPath $CATALOG_FILE -ServerID $SERVER_ID -AlwaysShowID $AUTO_FOLDER_ID
+    $script:FolderFormCancelled = $false
+    $selections = Show-FolderSelectionForm -CatalogPath $CATALOG_FILE -ServerID $SERVER_ID -CatalogID $AUTO_FOLDER_ID
 
-    if (-not $selections) {
+    if ($script:FolderFormCancelled) {
         Write-Host "Operation cancelled."
+        Exit-Script -Code 0
+    }
+    if (-not $selections) {
+        # Applied with nothing listed (every folder ignored, none shown).
+        Write-Host "Nothing to change."
         Exit-Script -Code 0
     }
 }
@@ -1264,43 +1488,8 @@ try {
     Write-Host "Warning: Could not fetch active folders list."
 }
 
-# Adds or removes one folder ID in the server device's ignoredFolders list.
-# We still GET first because we need the current list to change - but we
-# PATCH just the ignoredFolders field back, rather than PUTting the whole
-# device object. A PUT here would round-trip every other field on the device
-# (addresses, introducer, paused, etc.) through us, and if Syncthing changed
-# any of those between our GET and our PUT (e.g. the user editing something
-# in the GUI at the same time, or Syncthing updating its own connection state)
-# we'd silently clobber that change. PATCH only touches the field we name.
-# Syncthing's PATCH replaces the whole array, so the full new list is sent.
-function Set-FolderIgnored {
-    param([string]$FolderID, [string]$Label, [bool]$Ignore)
-
-    $devConfig = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices/$SERVER_ID"
-    $curIgnores = @($devConfig.ignoredFolders | Where-Object { $_ })
-    $isIgnored = [bool]($curIgnores | Where-Object { $_.id -eq $FolderID })
-
-    if ($Ignore) {
-        if ($isIgnored) { Write-Host "Folder already marked as ignored: $FolderID"; return }
-        $newIgnore = @{
-            id    = $FolderID
-            label = $Label
-            time  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        }
-        # Array concatenation returns a new array - simpler and safer here
-        # than trying to grow $curIgnores in place.
-        $updated = @($curIgnores) + $newIgnore
-        Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$SERVER_ID" -Body @{ ignoredFolders = $updated } | Out-Null
-        Write-Host "Successfully ignored folder via API: $FolderID"
-    } else {
-        if (-not $isIgnored) { return }
-        # @(...) keeps an empty result an empty array, so the last ignore can
-        # be removed and Syncthing receives [] rather than null.
-        $updated = @($curIgnores | Where-Object { $_.id -ne $FolderID })
-        Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$SERVER_ID" -Body @{ ignoredFolders = $updated } | Out-Null
-        Write-Host "No longer ignoring: $FolderID"
-    }
-}
+# (Set-FolderIgnored, used below, is defined above the All_Contents_List
+# section, which needs it too.)
 
 # Counted so that command-line mode can end with a failing exit code.
 $Failures = 0
@@ -1381,20 +1570,15 @@ foreach ($item in $selections) {
 if (Test-ConfigNeedsRepair -path $configFile) {
     Write-Host " "
     Write-Host "Tidying up config.xml (left untidy by an earlier version of this installer)..."
-    $syncthingProc = Get-Process -Name "syncthing" -ErrorAction SilentlyContinue
-    if ($syncthingProc) {
-        $syncthingProc | Stop-Process -Force
-        # Give Windows a moment to fully release the file handle on config.xml
-        # before we try to edit it.
-        Start-Sleep -Seconds 2
-    }
+    # Only OUR Syncthing (see Get-OurSyncthing): any other Syncthing on this
+    # computer is someone else's and is left running.
+    Stop-OurSyncthing
 
     Repair-CorruptedEmptyXmlFields -path $configFile
 
     # Restart the same way it's started earlier in this script (see the
     # "Make sure it's running right now too" block above).
-    Start-Process -FilePath $BIN -ArgumentList "serve", "--no-browser", "--home", $CONFIG_DIR -WindowStyle Hidden
-    Start-Sleep -Seconds 2
+    Start-OurSyncthing
 }
 # ============================================================================
 
