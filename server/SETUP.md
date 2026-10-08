@@ -114,10 +114,11 @@ sudo systemctl enable --now langtechdepot-register
 journalctl -u langtechdepot-register -f
 ```
 
-The form always shows the token on screen and mails a copy from
-`depot@langtech.cloud`. Fill in `SMTP_PASS` (or leave `SMTP_HOST` empty to turn
-mail off) — with a host and no password, every sign-up waits on a failing login.
-Set `AUTO_APPROVE=false` to queue requests for manual approval instead.
+Requests wait for approval (`AUTO_APPROVE=false`, the default): `ADMIN_EMAIL`
+gets each one with the exact `ltd-sync-admin approve <token>` command, and
+approving emails the token from `depot@langtech.cloud`. Mail is therefore not
+optional — fill in `SMTP_PASS`. Keep approval on while clients use introducer
+mode; see "The guard" in §6.
 
 Edit the management script, to make sure it has the right folder,
 the place to which you copied register.py,
@@ -201,7 +202,11 @@ ltd-sync-admin list              # who registered what
 ltd-sync-admin list --pending    # awaiting approval
 ltd-sync-admin approve <token>   # issue + email it
 ltd-sync-admin revoke <email>    # cut a machine off
+ltd-sync-admin restore <device>  # re-admit a device the guard cut off
 ```
+
+Before approving, check the request is a real person: every approved device
+is introduced to every field machine.
 
 `revoke` removes the device from Syncthing, which is what actually ends access;
 the database flag only stops the reconciler from re-adding it. Accepts an
@@ -209,6 +214,30 @@ email, a device ID, or a token.
 
 Tokens are single-use and admit one machine. A user with a laptop and a field
 desktop registers twice.
+
+### The guard
+
+Field machines sync from each other as well as from this server (introducer
+mode), and a receive-only folder accepts newer files from any device it shares
+with. So the registration service watches every catalog folder: since they are
+Send Only here, anything the server "needs" was changed by another device. It
+cuts that device off — which also removes it from every field machine — makes
+the server's copy the newest again (Override), and mails `ADMIN_EMAIL`. Watch
+for it with `journalctl -u langtechdepot-register | grep guard`.
+
+If the device was an honest user who switched a folder to Send & Receive, have
+them set it back to Receive Only, then `ltd-sync-admin restore <device-id>`.
+
+**Deploy it in report mode first.** `register.env.example` ships
+`GUARD_MODE=report`: for a day the guard only logs and mails what it *would*
+do. A machine set up by an early installer may still have a Send & Receive
+folder; that shows up here instead of being cut off. Sort those out, then set
+`GUARD_MODE=enforce` and restart the service.
+
+**Test it once in enforce mode:** on a test field machine, set one folder to
+Send & Receive, change a small file in it, and within a minute expect the
+guard's mail, the device gone from the server's Remote Devices, and the file
+back to the server's version on other machines. Then restore the test machine.
 
 ## 7. Optional extras
 

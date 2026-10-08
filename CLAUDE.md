@@ -16,8 +16,10 @@ California repository server and is not in here.
 
 ## How a device joins
 
-1. User fills the form at `PUBLIC_URL` → `register.py` mints a single-use token, shows it
-   on the page, and emails it when SMTP is configured (it is not yet — see Traps).
+1. User fills the form at `PUBLIC_URL` → `register.py` mints a single-use token. With
+   `AUTO_APPROVE=false` (the default, and the launch setting) it waits: `ADMIN_EMAIL` gets
+   the `ltd-sync-admin approve <token>` command, and approving emails the token. With
+   `true` the token is shown on the page and emailed.
 2. The installer POSTs `{token, deviceID, deviceName}` to `/register`. An installer re-run
    on a machine the server already knows skips the token.
 3. The service adds the device to Syncthing, shares every catalog folder with it, burns the token.
@@ -30,7 +32,19 @@ California repository server and is not in here.
 
 Server folders are **Send Only**; clients are receive-only. Every catalog folder is offered
 to every registered device. Syncthing's introducer mode lets clients learn each other, so
-office LANs sync peer-to-peer.
+office LANs sync peer-to-peer — that is the bandwidth saving, and it stays.
+
+**Introducer mode has a cost, and the guard pays it.** A receive-only folder accepts newer
+files from *any* device it shares with, not only the server, and the introducer connects
+every registered device to every field machine. So one registrant whose own copy is Send &
+Receive — malicious, or a user who clicked the wrong option — could push a changed
+`setup.exe` to the whole cluster. Syncthing has no "accept only from the server" setting.
+`guard_loop` in `register.py` closes the gap from the server: catalog folders here are Send
+Only, so the server can only *need* a version another device made, and `modifiedBy` names
+it. The guard cuts that device off (the introducer then drops it from every client),
+Overrides, and mails `ADMIN_EMAIL`. It reacts within seconds, not instantly, which is why
+`AUTO_APPROVE` stays false: a person checks who gets in. Don't turn either off while
+clients use introducer mode.
 
 **The catalog file is an interface.** `LangTechDepotFiles.txt` is generated on the server
 by a script outside this repo (LTUse's side), and both installers parse it. The folder
@@ -142,6 +156,7 @@ python3 server/test_register.py     # full test suite; no network, no real Synct
 ltd-sync-admin list [--pending]     # on the server: who registered what
 ltd-sync-admin approve <token>      # issue + email
 ltd-sync-admin revoke <email|device-id|token>
+ltd-sync-admin restore <device-id>  # undo a guard cut-off after an honest mistake
 ```
 
 `revoke` removes the device from Syncthing — that is what actually ends access; the DB flag
@@ -239,9 +254,11 @@ only stops the reconciler from re-adding it.
   `ltd-sync-admin` wrapper. Same underlying command.
 - **GitHub Pages needs one manual setting**: Settings → Pages → Source → *GitHub
   Actions*. Without it the workflow runs green and publishes nothing.
-- The token is **shown on the confirmation page**, and is meant to be emailed as well. A
-  field user on a slow link who has to go and find a mail client mid-install is one who
-  does not finish, so the page is the delivery and the mail the backup. Mail goes out
+- **With approval on, mail is the only delivery.** With `AUTO_APPROVE=true` the token is
+  shown on the page and mail is the backup (a field user who has to go and find a mail
+  client mid-install may not finish); with `false` it cannot be, so the site's step 1 is
+  worded for email, and `docs/help.html` has "My token has not arrived". Flip the setting
+  and that wording must change with it. Mail goes out
   from `depot@langtech.cloud` (Zoho, `smtppro.zoho.com`), which is also the support
   address `docs/help.html` gives and is read in Thunderbird. If SMTP fails, the page
   says it is the only copy — keep that fallback. `register.env.example` ships with

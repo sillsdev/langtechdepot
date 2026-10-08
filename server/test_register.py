@@ -4,7 +4,7 @@ No network, no real Syncthing, no state outside a temp dir.
 
     python3 test_register.py
 """
-import json, os, re, shutil, socket, sqlite3, subprocess, sys, tempfile, threading, time, urllib.error, urllib.request
+import json, os, re, shutil, socket, sqlite3, subprocess, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -16,10 +16,15 @@ DEV2 = "ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2-ABCDEF2"
 # Fits DEVICE_ID_RE, but the stub Syncthing refuses it, as the real one does a
 # device ID whose check digits are wrong.
 BADLUHN = "BADBADB-BADBADB-BADBADB-BADBADB-BADBADB-BADBADB-BADBADB-BADBADB"
+SERVER = "SERVER1-SERVER1-SERVER1-SERVER1-SERVER1-SERVER1-SERVER1-SERVER1"
+DEV3 = "GUARDED-GUARDED-GUARDED-GUARDED-GUARDED-GUARDED-GUARDED-GUARDED"
 
 state = {"devices": [], "folders": [{"id": "software-core", "devices": []},
                                     {"id": "training-videos", "devices": []}],
-         "deleted": [], "patches": []}
+         "deleted": [], "patches": [],
+         # Versions some other device made, per folder: {file: modifiedBy}.
+         # On a Send Only folder that is exactly what the server "needs".
+         "foreign": {}, "overrides": []}
 
 
 class Fake(BaseHTTPRequestHandler):
@@ -31,12 +36,27 @@ class Fake(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 
     def do_GET(self):
-        if self.path == "/rest/system/status": self._j(200, {"myID": "SERVER1-SERVER1-SERVER1-SERVER1-SERVER1-SERVER1-SERVER1-SERVER1"})
-        elif self.path == "/rest/config/devices": self._j(200, state["devices"])
-        elif self.path == "/rest/config/folders": self._j(200, state["folders"])
+        u = urllib.parse.urlparse(self.path)
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+        foreign = state["foreign"].get(q.get("folder"), {})
+        if u.path == "/rest/system/status": self._j(200, {"myID": SERVER, "uptime": 100})
+        elif u.path == "/rest/config/devices": self._j(200, state["devices"])
+        elif u.path == "/rest/config/folders": self._j(200, state["folders"])
+        elif u.path == "/rest/db/status": self._j(200, {"needTotalItems": len(foreign)})
+        elif u.path == "/rest/db/need":
+            self._j(200, {"progress": [], "queued": [], "rest": [{"name": n} for n in foreign]})
+        elif u.path == "/rest/db/file":
+            self._j(200, {"global": {"name": q["file"], "modifiedBy": foreign.get(q["file"], "")}})
+        elif u.path == "/rest/events":
+            time.sleep(1); self._j(200, [])  # a long-poll with nothing to say
         else: self._j(404, {})
 
     def do_POST(self):
+        u = urllib.parse.urlparse(self.path)
+        if u.path == "/rest/db/override":
+            fid = urllib.parse.parse_qs(u.query)["folder"][0]
+            state["overrides"].append(fid); state["foreign"].pop(fid, None)
+            self._j(200, {}); return
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.path == "/rest/config/devices" and body.get("deviceID") == BADLUHN:
             b = b"invalid device ID: check character incorrect\n"
@@ -122,7 +142,10 @@ ISOLATE = {"REGISTER_ENV": os.path.join(TMP, "no-such.env"),
            "LISTEN_PORT": "18385", "AUTO_APPROVE": "true", "CATALOG_FOLDERS": "",
            "SMTP_HOST": "", "ADMIN_EMAIL": "", "PUBLIC_URL": "",
            "SITE_URL": "https://sillsdev.github.io/langtechdepot",
-           "SERVER_ADDRESS": "tcp://langtechdepot.example.org:22000"}
+           "SERVER_ADDRESS": "tcp://langtechdepot.example.org:22000",
+           # The service's own guard sweeps once at boot, then waits on events
+           # (the stub has none); the tests call guard_folder() themselves.
+           "GUARD_SWEEP": "3600"}
 env = {**os.environ, **ISOLATE}
 proc = subprocess.Popen([sys.executable, os.path.join(REPO, "register.py")], env=env,
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -280,6 +303,59 @@ t_new = new_token("198.51.100.13")
 code, body = register(t_new, DEV)
 check("revoked device refused even with a fresh token", code == 400 and "revoked" in body, body)
 check("revoked device not re-added to syncthing", all(d["deviceID"] != DEV for d in state["devices"]))
+
+# The guard: introducer mode lets any registered device reach every field
+# machine, so a change to a catalog folder by anything but the server must
+# cost that device its access and be undone.
+t3 = new_token("198.51.100.20")
+# Report mode: names the culprit, touches nothing.
+reg.GUARD_MODE = "report"
+state["foreign"]["software-core"] = {"x.txt": "P56IOI7"}
+before = (len(state["overrides"]), len(state["deleted"]))
+check("guard in report mode changes nothing",
+      reg.guard_folder("software-core") == [] and
+      (len(state["overrides"]), len(state["deleted"])) == before and state["foreign"]["software-core"])
+reg.GUARD_MODE = "enforce"
+del state["foreign"]["software-core"]
+check("guard test device registers", register(t3, DEV3, "198.51.100.20")[0] == 200)
+state["foreign"]["software-core"] = {"setup.exe": "GUARDED", "README.txt": "GUARDED"}
+cut = reg.guard_folder("software-core")
+check("guard names the device that changed a catalog folder", cut == [DEV3], cut)
+check("guard removes that device from syncthing",
+      DEV3 in state["deleted"] and all(d["deviceID"] != DEV3 for d in state["devices"]))
+check("guard puts the server's copy back (override)",
+      "software-core" in state["overrides"] and "software-core" not in state["foreign"])
+code, body = register(new_token("198.51.100.21"), DEV3, "198.51.100.21")
+check("a device the guard cut off cannot come back with a fresh token",
+      code == 400 and "revoked" in body, body)
+
+before = len(state["overrides"])
+check("guard does nothing when nothing foreign is there",
+      reg.guard_folder("software-core") == [] and len(state["overrides"]) == before)
+state["foreign"]["training-videos"] = {"a.txt": SERVER.split("-")[0]}
+check("guard never cuts off the server itself, but still overrides",
+      reg.guard_folder("training-videos") == [] and "training-videos" in state["overrides"])
+
+out = subprocess.run([sys.executable, os.path.join(REPO, "register.py"), "admin", "restore", DEV3],
+                     env=env, capture_output=True, text=True)
+check("admin restore re-admits a device the guard cut off",
+      "restored" in out.stdout and any(d["deviceID"] == DEV3 for d in state["devices"]),
+      out.stdout + out.stderr)
+check("a restored device can re-run the installer with its old token",
+      register(t3, DEV3, "198.51.100.22")[0] == 200)
+
+# Approval mode (the launch setting): a request waits for a person.
+reg.AUTO_APPROVE = False
+t4, mailed = reg.issue_token("wait@sil.org", "W", "", "")
+check("with approval on, a request mints no usable token yet", t4 and not mailed)
+check("the form says a person checks it", "check each request by hand" in reg.form_page("windows"))
+code, body = register(t4, DEV2, "198.51.100.23")
+check("an unapproved token is refused", code == 400 and "awaiting approval" in body, body)
+out = subprocess.run([sys.executable, os.path.join(REPO, "register.py"), "admin", "approve", t4],
+                     env=env, capture_output=True, text=True).stdout
+check("approve says when the mail could not go", "send them" in out and t4 in out, out)
+check("an approved token works", register(t4, DEV2, "198.51.100.23")[0] == 200)
+reg.AUTO_APPROVE = True
 
 # Behind Caddy every peer is 127.0.0.1; the bucket is the last X-Forwarded-For.
 def form_from(xff):

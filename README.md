@@ -167,7 +167,8 @@ as its own device whenever the drive visits a connected machine.
 See [server/SETUP.md](server/SETUP.md) — Syncthing standup, the folder catalog,
 and the registration service ([server/register.py](server/register.py)) that
 serves the form, issues single-use tokens, admits devices, and keeps the
-catalog shared. Administration is `register.py admin list|approve|revoke`.
+catalog shared — and guards it: a change from any device but the server is undone and
+that device cut off. Administration is `register.py admin list|approve|revoke|restore`.
 
 [server/Caddyfile.example](server/Caddyfile.example) carries the recipe for the
 end state: the instructions site served from `depot.langtech.cloud` itself,

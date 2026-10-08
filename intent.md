@@ -126,6 +126,13 @@ else should update over the local network for free.
 field machines to each other and devices holding the same folder sync directly. On one
 office LAN, only the first machine to want a file pulls it across the ocean.
 
+That has a price: a receive-only folder accepts newer files from any device it shares
+with, so every registered device could push a changed file to every field machine.
+Two things pay it. The server guards the catalog — a change from any device but itself is
+undone within seconds and that device cut off — and since October 2026 each registration
+is checked by a person before its token is sent. The second is a step back from "an open
+website, not an invitation list": anyone may still ask, but someone now says yes.
+
 **Gap.** That happens by accident of topology, not by design. There is no designated
 mirror role, no way to nominate a machine as the local source, no guidance for the
 support person who would run one, and no way to confirm from a client that the file
