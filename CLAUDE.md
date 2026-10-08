@@ -125,7 +125,9 @@ The version number lives in **one place: the git release tag** (`v1.0.1`). Nothi
 the repo holds it. `client/version.sh` reads it; `build-bat.sh` writes it into the one
 line `$LTD_VERSION = "dev"` of the built `.bat` (the `.ps1` itself always says `dev`),
 and the Pages workflow puts it on the download page (`<!--LTD_VERSION-->` placeholder
-in `windows.html`). Users see it in the installer's first line, the folder list's
+in `windows.html`). On Linux the workflow writes it into the one line
+`LTD_VERSION="dev"` of the published `install-langtechdepot.sh`, and onto `linux.html`
+(same placeholder). Users see it in the installer's first line, the folder list's
 title, `READ-ME.txt`, and `modify-langtechdepot version`.
 
 If `client/` has changed since the last tag, the label is `1.0.1+dev.<commit>` — a
@@ -228,6 +230,16 @@ only stops the reconciler from re-adding it.
   before 1.1 kept the folders directly in the home folder; the installer leaves those
   as they are (no `Assets` item). Not Downloads (gets cleaned out, and a startup program there looks like
   malware), not Documents/Desktop (often OneDrive-synced, so gigabytes would upload).
+- **Linux mirrors the Windows home folder** (1.2): `~/LangTechDepot` holds `Assets`
+  (a real folder, or a *symbolic link* when the user chose another disk), `READ-ME.txt`,
+  `Change-my-Assets.desktop` and `Am I up-to-date, and advanced management.html`, and
+  is bookmarked in the GTK sidebar once. The installer hard-links itself to
+  `~/.local/bin/modify-langtechdepot` (copy if on another filesystem), which the
+  launcher runs in a terminal. The same launcher goes in the applications menu,
+  because GNOME Files (Ubuntu) will not run a `.desktop` file from a folder; Nemo
+  (Wasta, Mint) will. The "Am I up-to-date" item is an `.html` redirect because every
+  desktop opens those in the browser. Paths are compared with `realpath -m -s` (not
+  following links), or the `Assets` link would look like the place it points to.
 - **People are told `localhost:<port>`; the script uses `127.0.0.1:<port>`.** Syncthing
   is bound to 127.0.0.1; "localhost" may resolve to `::1` first. Browsers fall back,
   `Invoke-RestMethod` callers shouldn't have to. `$GUI_PAGE` is for messages and

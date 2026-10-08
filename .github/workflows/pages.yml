@@ -53,9 +53,11 @@ jobs:
           # page carries a marked placeholder; refuse to publish without it.
           version=$(sh client/version.sh)
           echo "Version: $version"
-          grep -q '<!--LTD_VERSION-->' _site/windows.html \
-            || { echo "windows.html has lost its <!--LTD_VERSION--> placeholder"; exit 1; }
-          sed -i "s|<!--LTD_VERSION-->[^<]*<!--/LTD_VERSION-->|$version|" _site/windows.html
+          for page in windows.html linux.html; do
+            grep -q '<!--LTD_VERSION-->' "_site/$page" \
+              || { echo "$page has lost its <!--LTD_VERSION--> placeholder"; exit 1; }
+            sed -i "s|<!--LTD_VERSION-->[^<]*<!--/LTD_VERSION-->|$version|" "_site/$page"
+          done
           # Windows: setup-langtechdepot.bat is built here from the launcher
           # header plus setup-langtechdepot.ps1, which it extracts and runs at
           # install time, so the .ps1 is the only copy anyone edits. It ships
@@ -73,7 +75,12 @@ jobs:
             _build/setup-langtechdepot.bat \
             client/START-HERE.txt
           # Linux: the installer is fetched by the one command on linux.html.
-          cp client/install-langtechdepot.sh _site/downloads/
+          # Its LTD_VERSION="dev" line gets the version, as the .bat does in
+          # build-bat.sh; exactly one such line, or refuse to publish.
+          [ "$(grep -c '^LTD_VERSION="dev"$' client/install-langtechdepot.sh)" = 1 ] \
+            || { echo 'install-langtechdepot.sh needs exactly one LTD_VERSION="dev" line'; exit 1; }
+          sed "s|^LTD_VERSION=\"dev\"\$|LTD_VERSION=\"$version\"|" client/install-langtechdepot.sh \
+            > _site/downloads/install-langtechdepot.sh
           # Linux: the optional command-line catalog tool. (Windows has none
           # to download: the installer installs itself as
           # modify-langtechdepot.bat, which does the same job.)

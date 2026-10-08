@@ -20,6 +20,17 @@ REGISTER_URL='https://depot.langtech.cloud'
 # it does not answer "it failed", and those are different people.
 HELP_URL='https://depot.langtech.cloud/help.html'
 
+# Stamped by the site build (.github/workflows/pages.yml) from the release tag;
+# "dev" means a copy straight from the repo. Shown at the start, in the folder
+# list's title and in READ-ME.txt, so a user can tell a helper which one ran.
+LTD_VERSION="dev"
+
+case "${1:-}" in
+    version|--version) echo "$LTD_VERSION"; exit 0 ;;
+esac
+echo "LangTechDepot installer, version $LTD_VERSION"
+echo
+
 # The folder picker is a yad window. Checked here, before anything is installed
 # or a token is spent: missing yad used to surface only at the picker, after
 # registration, as "Operation cancelled." and exit 0.
@@ -66,11 +77,41 @@ EOF
     exit 1
 fi
 
-DATA_ROOT="$HOME/LangTechDepot"
+# Two places, kept apart on purpose (the same as on Windows):
+#   HOME_BASE  ~/LangTechDepot - always here, bookmarked in the file manager.
+#              Holds READ-ME.txt, Change-my-Assets, "Am I up-to-date..." and
+#              Assets. It is the one place anyone is ever told to look.
+#   DATA_ROOT  where Syncthing puts the synced folders (the Assets). By default
+#              HOME_BASE/Assets, a real folder; if the user picks somewhere
+#              else (another disk, a USB drive), Assets in HOME_BASE is a
+#              symbolic link to it instead. Decided after registration, below.
+# So the instructions are the same for everyone, and on a machine whose Assets
+# live on a USB disk, the support items do not vanish when it is unplugged.
+HOME_BASE="$HOME/LangTechDepot"
+DEFAULT_ASSETS="$HOME_BASE/Assets"
+DATA_ROOT=''
 LOCAL_BIN="$HOME/.local/bin/syncthing"
 BIN=''
 
-mkdir -p "$DATA_ROOT" "$HOME/.local/bin"
+mkdir -p "$HOME_BASE" "$HOME/.local/bin"
+
+# The installer keeps itself as ~/.local/bin/modify-langtechdepot, which is
+# what Change-my-Assets runs. A hard link rather than a copy: the downloaded
+# file can then be moved or deleted and the command still works, and
+# downloading a newer installer over the same name updates both at once. A
+# copy only when the download is on another filesystem. Skipped when this run
+# IS modify-langtechdepot, or the script was not run from a file at all.
+MODIFY_CMD="$HOME/.local/bin/modify-langtechdepot"
+SELF=$(readlink -f -- "$0" 2>/dev/null || true)
+if [ -f "$SELF" ] && ! [ "$SELF" -ef "$MODIFY_CMD" ]; then
+    rm -f "$MODIFY_CMD.new"
+    if { ln -- "$SELF" "$MODIFY_CMD.new" 2>/dev/null || cp -- "$SELF" "$MODIFY_CMD.new"; } &&
+       chmod +x "$MODIFY_CMD.new" && mv -f "$MODIFY_CMD.new" "$MODIFY_CMD"; then
+        :
+    else
+        echo "Note: could not set up $MODIFY_CMD (Change-my-Assets needs it)."
+    fi
+fi
 
 # This script needs the `generate` and `serve` subcommands. 1.18.0 still only
 # knows -generate=<dir> as a flag and fails on `generate --home`; 1.19 has both
@@ -317,9 +358,241 @@ else
     fi
 fi
 
+# -----------------------------------------------------------------------------
+# Where the Assets go
+# -----------------------------------------------------------------------------
+# Asked once. Syncthing fixes each folder's path when the folder is created, so
+# a different answer on a later run would only affect brand-new folders. "Once"
+# is read from Syncthing's default folder path, which only this script sets:
+# empty, "~" or the home folder itself means the question is still open (a
+# first run that stopped at the token prompt, say). A machine set up before
+# this version has ~/LangTechDepot there and keeps it.
+#
+# Compared as written, without following symbolic links: Assets may itself be
+# a link to the real place, and must not then count as "the same".
+same_path() { [ "$(realpath -m -s -- "$1")" = "$(realpath -m -s -- "$2")" ]; }
+
+SAVED_ROOT=$(api GET /rest/config/defaults/folder |
+    python3 -c "import json,sys; print(json.load(sys.stdin).get('path') or '')") || SAVED_ROOT=''
+# shellcheck disable=SC2088  # a literal "~" is what Syncthing stores
+case "$SAVED_ROOT" in '~'|'~/') SAVED_ROOT='' ;; esac
+if [ -n "$SAVED_ROOT" ] && same_path "$SAVED_ROOT" "$HOME"; then SAVED_ROOT=''; fi
+
+if [ -n "$SAVED_ROOT" ]; then
+    DATA_ROOT="$SAVED_ROOT"
+else
+    echo
+    echo "Next: where to keep your LangTechDepot Assets - the folders of files"
+    echo "that come from the depot. Click OK for the suggested place:"
+    echo "    $DEFAULT_ASSETS"
+    echo "or pick another place, such as a USB disk; a folder called"
+    echo "LangTechDepot will be made there."
+    echo
+    sleep 3
+
+    # The chooser opens on the suggested folder, so a plain OK takes it. It
+    # has to exist for that; if something else is chosen, the empty one is
+    # tidied away again.
+    MADE_DEFAULT=0
+    if ! [ -d "$DEFAULT_ASSETS" ]; then mkdir -p "$DEFAULT_ASSETS"; MADE_DEFAULT=1; fi
+
+    set +e
+    PICKED=$(yad --file --directory \
+        --title="LangTechDepot $LTD_VERSION - Where should your Assets be kept?" \
+        --text="Click OK for the suggested place, or choose another." \
+        --filename="$DEFAULT_ASSETS/" --width=760 --height=520 2>/dev/null)
+    PICK_RC=$?
+    set -e
+
+    if [ "$PICK_RC" -eq 0 ] && [ -n "$PICKED" ]; then
+        PICKED="${PICKED%/}"; PICKED="${PICKED:-/}"
+        if same_path "$PICKED" "$HOME_BASE"; then
+            # The home folder itself: the Assets go in their usual place in it.
+            DATA_ROOT="$DEFAULT_ASSETS"
+        else
+            # Anything else - a disk, a USB drive - gets a folder called
+            # LangTechDepot, never files loose in it. On a disk someone
+            # carries or lends, that name says what it is.
+            case "$(basename -- "$PICKED")" in
+                LangTechDepot|Assets) DATA_ROOT="$PICKED" ;;
+                *) DATA_ROOT="${PICKED%/}/LangTechDepot" ;;
+            esac
+        fi
+        # Never the home folder itself (picking ~ makes ~/LangTechDepot).
+        if same_path "$DATA_ROOT" "$HOME_BASE"; then
+            DATA_ROOT="$DEFAULT_ASSETS"
+            echo "That is where the LangTechDepot folder itself goes, so the Assets will be"
+            echo "kept in the Assets folder inside it."
+        fi
+    else
+        DATA_ROOT="$DEFAULT_ASSETS"
+        echo "No folder chosen - using the suggested place."
+    fi
+    if ! mkdir -p -- "$DATA_ROOT" 2>/dev/null || ! [ -w "$DATA_ROOT" ]; then
+        echo "Cannot write to $DATA_ROOT - using the suggested place instead."
+        DATA_ROOT="$DEFAULT_ASSETS"
+    fi
+    if [ "$MADE_DEFAULT" = 1 ] && ! same_path "$DATA_ROOT" "$DEFAULT_ASSETS"; then
+        rmdir -- "$DEFAULT_ASSETS" 2>/dev/null || true
+    fi
+    echo "Your Assets will be kept in: $DATA_ROOT"
+    echo
+fi
+mkdir -p -- "$DATA_ROOT"
+
 # Receive-only: a stray local edit gets flagged and reverted, never propagated.
-api PATCH /rest/config/defaults/folder "{\"type\": \"receiveonly\", \"path\": \"$DATA_ROOT\"}" >/dev/null ||
+# The path is also where Syncthing's own "Add Folder" button starts.
+DEFAULTS_JSON=$(python3 -c 'import json,sys; print(json.dumps({"type": "receiveonly", "path": sys.argv[1]}))' "$DATA_ROOT")
+api PATCH /rest/config/defaults/folder "$DEFAULTS_JSON" >/dev/null ||
     after_registration_failed "Could not set Syncthing's folder defaults on this computer."
+
+# -----------------------------------------------------------------------------
+# The LangTechDepot folder: the part people use
+# -----------------------------------------------------------------------------
+# Rewritten on every run, so it stays current and comes back if deleted:
+#   Assets             the synced folders: a real folder, or a symbolic link
+#                      when they are kept somewhere else
+#   READ-ME.txt        what this is and what to do
+#   Change-my-Assets   a launcher for modify-langtechdepot: the folder list
+#   Am I up-to-date, and advanced management.html
+#                      opens the Syncthing page in the web browser
+# Change-my-Assets is also put in the applications menu, because not every file
+# manager runs a launcher from inside a folder (Nemo on Wasta and Mint does;
+# GNOME Files on Ubuntu does not). The folder is bookmarked in the file
+# manager's sidebar once only, so someone who removes it is not overruled.
+# None of this is fatal.
+# Three cases; the third, the layout before 1.2, has no flag of its own.
+ASSETS_HERE=0; ASSETS_AWAY=0
+if same_path "$DATA_ROOT" "$DEFAULT_ASSETS"; then ASSETS_HERE=1
+elif same_path "$DATA_ROOT" "$HOME_BASE"; then :   # synced folders directly in ~/LangTechDepot
+else ASSETS_AWAY=1
+fi
+
+if [ "$ASSETS_AWAY" = 1 ]; then
+    # An empty Assets folder (from the chooser's suggestion) makes way for the
+    # link; one with files in it is left alone.
+    if [ -d "$DEFAULT_ASSETS" ] && ! [ -L "$DEFAULT_ASSETS" ]; then
+        rmdir -- "$DEFAULT_ASSETS" 2>/dev/null || true
+    fi
+    if [ -L "$DEFAULT_ASSETS" ] || ! [ -e "$DEFAULT_ASSETS" ]; then
+        ln -sfn -- "$DATA_ROOT" "$DEFAULT_ASSETS" || echo "Note: could not make the Assets link."
+    else
+        echo "Note: $DEFAULT_ASSETS already has files in it, so it was left as it is."
+    fi
+elif [ "$ASSETS_HERE" = 0 ] && [ -L "$DEFAULT_ASSETS" ]; then
+    rm -f -- "$DEFAULT_ASSETS"
+fi
+
+if [ "$ASSETS_HERE" = 1 ]; then
+    ASSETS_TEXT="  Assets
+      The LangTechDepot folders you chose, such as Linux or Android_apps."
+    LIST_PATH="Assets/All_Contents_List/LangTechDepotFiles.txt"
+elif [ "$ASSETS_AWAY" = 1 ]; then
+    ASSETS_TEXT="  Assets
+      A link to the LangTechDepot folders you chose, such as Linux or
+      Android_apps. They are kept at:
+      $DATA_ROOT"
+    LIST_PATH="Assets/All_Contents_List/LangTechDepotFiles.txt"
+else
+    ASSETS_TEXT="  The other folders here (such as Linux or Android_apps)
+      The LangTechDepot folders you chose."
+    LIST_PATH="All_Contents_List/LangTechDepotFiles.txt"
+fi
+
+if ! cat > "$HOME_BASE/READ-ME.txt" 2>/dev/null <<EOF
+LangTechDepot
+=============
+(Set up by LangTechDepot version $LTD_VERSION.)
+
+In this folder:
+
+$ASSETS_TEXT
+      Each is kept up to date from the LangTechDepot server, automatically,
+      whenever this computer is on the internet. Please don't change or
+      delete files inside them: they are a copy of what is on the server.
+      To change something, copy it somewhere else first.
+
+      $LIST_PATH
+      lists every file available in the depot, and the size of each folder.
+
+  Change-my-Assets
+      Add folders, take back ones you ignored, or stop ones you no longer
+      need. Opens the same list of folders you saw when you installed.
+      It is also in your applications menu as "LangTechDepot: Change my Assets".
+
+  Am I up-to-date, and advanced management
+      Opens the Syncthing page ($GUI_PAGE) in your web browser.
+      When every folder there says "Up to Date", you have everything -
+      check this before you travel.
+
+In a terminal:
+  modify-langtechdepot            the same list of folders
+  modify-langtechdepot version    which version is installed
+  (If that command is not found, log out and back in once, or type
+  ~/.local/bin/modify-langtechdepot instead.)
+
+Help: $HELP_URL
+EOF
+then
+    echo "Note: could not write $HOME_BASE/READ-ME.txt"
+fi
+
+# A web page that sends the browser straight on: double-clicking an .html file
+# opens the browser on every Linux desktop, which a .desktop link does not.
+if ! cat > "$HOME_BASE/Am I up-to-date, and advanced management.html" 2>/dev/null <<EOF
+<!doctype html>
+<meta charset="utf-8">
+<title>LangTechDepot - Syncthing</title>
+<meta http-equiv="refresh" content="0; url=$GUI_PAGE/">
+<p>Opening <a href="$GUI_PAGE/">the Syncthing page</a> ...</p>
+EOF
+then
+    echo "Note: could not create the link to the Syncthing page."
+fi
+
+# Launchers. Exec runs the command in a terminal and waits for Enter, so the
+# messages can be read. A path holding a quote, \$, backquote or backslash
+# would need escaping under the desktop-entry rules; no launcher then (the
+# command and the menu still work from a terminal).
+write_launcher() { # write_launcher FILE NAME
+    cat > "$1" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$2
+Comment=Choose which LangTechDepot folders this computer keeps
+Exec=bash -c "'$MODIFY_CMD'; echo; read -r -p 'Press Enter to close this window. ' _"
+Icon=system-software-update
+Terminal=true
+Categories=Utility;
+EOF
+}
+case "$MODIFY_CMD" in
+    *[\'\"\$\`\\]*)
+        echo "Note: no Change-my-Assets launcher - run $MODIFY_CMD in a terminal instead." ;;
+    *)
+        LAUNCHER="$HOME_BASE/Change-my-Assets.desktop"
+        APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+        if write_launcher "$LAUNCHER" "Change-my-Assets" 2>/dev/null && chmod +x "$LAUNCHER"; then
+            # GNOME and Nemo ask before running a launcher they do not trust.
+            gio set "$LAUNCHER" metadata::trusted true 2>/dev/null || true
+        else
+            echo "Note: could not create the Change-my-Assets launcher."
+        fi
+        mkdir -p "$APPS_DIR" 2>/dev/null &&
+            write_launcher "$APPS_DIR/langtechdepot-change-my-assets.desktop" "LangTechDepot: Change my Assets" 2>/dev/null ||
+            echo "Note: could not add Change my Assets to the applications menu."
+        ;;
+esac
+
+BOOKMARKS="${XDG_CONFIG_HOME:-$HOME/.config}/gtk-3.0/bookmarks"
+BOOKMARKED_MARK="$CONFIG_DIR/bookmarked-in-sidebar.txt"
+if ! [ -f "$BOOKMARKED_MARK" ]; then
+    BM_URI=$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).as_uri())' "$HOME_BASE")
+    if mkdir -p "$(dirname "$BOOKMARKS")" 2>/dev/null &&
+       { grep -qF -- "$BM_URI" "$BOOKMARKS" 2>/dev/null || printf '%s LangTechDepot\n' "$BM_URI" >> "$BOOKMARKS"; }; then
+        echo "$HOME_BASE" > "$BOOKMARKED_MARK" 2>/dev/null || true
+    fi
+fi
 
 # -----------------------------------------------------------------------------
 # AUTO-SUBSCRIBE: All_Contents_List
@@ -328,33 +601,43 @@ api PATCH /rest/config/defaults/folder "{\"type\": \"receiveonly\", \"path\": \"
 # Variables for the repo contents list that we auto-install
 #
 AUTO_FOLDER_ID="All_Contents_List"
-AUTO_FOLDER_PATH="$DATA_ROOT/$AUTO_FOLDER_ID"
+# Already subscribed (a re-run): leave it exactly as it is, as on Windows.
+# POSTing it again would replace its settings, dropping the other field
+# machines the server introduced it to, and it keeps its own path even if
+# the Assets were put somewhere else later.
+EXISTING_CATALOG_PATH=$(api GET "/rest/config/folders/$AUTO_FOLDER_ID" 2>/dev/null |
+    python3 -c "import json,sys; print(json.load(sys.stdin).get('path') or '')" 2>/dev/null) ||
+    EXISTING_CATALOG_PATH=''
+if [ -n "$EXISTING_CATALOG_PATH" ]; then
+    AUTO_FOLDER_PATH="$EXISTING_CATALOG_PATH"
+else
+    AUTO_FOLDER_PATH="$DATA_ROOT/$AUTO_FOLDER_ID"
+fi
 CATALOG_FILE="$AUTO_FOLDER_PATH/LangTechDepotFiles.txt"
 
-echo "Subscribing to $AUTO_FOLDER_ID, which contains a list"
-echo "of all the files available in the Depot"
-echo "and the size of each folder you can subscribe to ..."
-echo " "
-sleep 4
-mkdir -p "$AUTO_FOLDER_PATH"
+if [ -n "$EXISTING_CATALOG_PATH" ]; then
+    echo "Already subscribed to $AUTO_FOLDER_ID, the list of everything available."
+else
+    echo "Subscribing to $AUTO_FOLDER_ID, which contains a list"
+    echo "of all the files available in the Depot"
+    echo "and the size of each folder you can subscribe to ..."
+    echo " "
+    sleep 4
+    mkdir -p "$AUTO_FOLDER_PATH"
 
-if ! api POST /rest/config/folders "{
-  \"id\": \"$AUTO_FOLDER_ID\",
-  \"label\": \"All_Contents_List -- a list of all files available\",
-  \"path\": \"$AUTO_FOLDER_PATH\",
-  \"type\": \"receiveonly\",
-  \"rescanIntervalS\": 3600,
-  \"fsWatcherEnabled\": true,
-  \"devices\": [{\"deviceID\": \"$SERVER_ID\"}]
-}" >/dev/null; then
-    after_registration_failed "Could not subscribe Syncthing on this computer to $AUTO_FOLDER_ID."
+    CATALOG_JSON=$(python3 -c 'import json,sys; print(json.dumps({
+        "id": sys.argv[1], "label": "All_Contents_List -- a list of all files available",
+        "path": sys.argv[2], "type": "receiveonly", "rescanIntervalS": 3600,
+        "fsWatcherEnabled": True, "devices": [{"deviceID": sys.argv[3]}]}))' \
+        "$AUTO_FOLDER_ID" "$AUTO_FOLDER_PATH" "$SERVER_ID")
+    if ! api POST /rest/config/folders "$CATALOG_JSON" >/dev/null; then
+        after_registration_failed "Could not subscribe Syncthing on this computer to $AUTO_FOLDER_ID."
+    fi
+    echo "Automatically subscribed to: $AUTO_FOLDER_ID"
+    echo 'The folder catalog will appear within a minute or two.'
+    echo " "
+    sleep 4
 fi
-
-echo "Sync data root: $DATA_ROOT"
-echo "Automatically subscribed to: $AUTO_FOLDER_ID"
-echo 'The folder catalog will appear within a minute or two.'
-echo " "
-sleep 4
 
 # -----------------------------------------------------------------------------
 # Wait for the catalog, then show the folder list
@@ -571,7 +854,7 @@ while true; do
     # so an odd one (Clear All was 11) loses the ticks and does nothing.
     set +e
     yad --list \
-        --title="LangTechDepot - Available Folders" \
+        --title="LangTechDepot $LTD_VERSION - Available Folders" \
         --text="Check (+) the folders you want to sync. <span foreground='white' background='red'><b> NOTE: All unchecked folders will be IGNORED (-) </b></span>\n(The list of everything available, $AUTO_FOLDER_ID, is always kept.)" \
         --column="Subscribe (+):CHK" \
         --column="Now" \
@@ -607,8 +890,15 @@ picker apply "$SELECTIONS_FILE" "$DATA_ROOT" ||
     echo "Some changes failed - see above. Run the installer again to retry them (no new token needed). Help: $HELP_URL"
 
 echo " "
-echo "To add more folders later, or take back one you ignored,"
-echo "just run this installer again. In the folder list, click"
+echo "Your LangTechDepot folder is $HOME_BASE"
+echo "(it is also in your file manager's sidebar). READ-ME.txt there explains it."
+echo " "
+echo "To add more folders later, or take back one you ignored, double-click"
+echo "Change-my-Assets in that folder, or choose 'LangTechDepot: Change my Assets'"
+echo "from your applications menu. In the folder list, click"
 echo "'Also display ignored folders' to see the ones you ignored."
 echo " "
-echo "If you ever need to manage Syncthing directly, open $GUI_PAGE."
+echo "To check you are up to date, or to manage Syncthing directly, open $GUI_PAGE"
+echo "(or 'Am I up-to-date, and advanced management' in the LangTechDepot folder)."
+echo " "
+echo "LangTechDepot version $LTD_VERSION"

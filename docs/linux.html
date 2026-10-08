@@ -92,6 +92,7 @@
       <code class="val" id="cmd" data-site-url>curl -fsSL https://depot.langtech.cloud/downloads/install-langtechdepot.sh -o install-langtechdepot.sh &amp;&amp; bash install-langtechdepot.sh</code>
       <button class="copybtn" type="button" data-copy="cmd">Copy</button>
     </div>
+    <p class="sub-btn">Installer version <!--LTD_VERSION-->dev<!--/LTD_VERSION--></p>
     <div class="art">
       <svg viewBox="0 0 320 116" width="320" role="img" aria-label="The installer running in the terminal and asking for the token">
         <rect x="2" y="8" width="316" height="100" rx="8" fill="#10161d" stroke="var(--line)" stroke-width="2"/>
@@ -118,9 +119,13 @@
   <section class="step">
     <div class="num">4</div>
     <h3>Pick the folders you want</h3>
-    <p>Within a minute or two a window lists every folder on offer, with its
-    size and a line saying what is in it. Tick the ones you want and click
-    <strong>Apply</strong>. Files arrive under <code>~/LangTechDepot</code>.</p>
+    <p>First the installer asks where to keep your Assets &mdash; the folders
+    of files from the depot. Click <strong>OK</strong> for the suggested place,
+    <code>~/LangTechDepot/Assets</code>, or choose another disk, such as a USB
+    drive (a folder called LangTechDepot is made there). Then, within a minute
+    or two, a window lists every folder on offer, with its size and a line
+    saying what is in it. Tick the ones you want and click
+    <strong>Apply</strong>.</p>
     <div class="art">
       <svg viewBox="0 0 320 132" width="320" role="img" aria-label="The installer's folder list: a tick box, size, folder ID and description on each row, Android_apps ticked, Documentation not, and an Apply button">
         <rect x="2" y="6" width="316" height="120" rx="8" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
@@ -144,28 +149,49 @@
     </div>
     <div class="note">
       <strong>Anything left unticked is set aside</strong>, and Syncthing stops
-      offering it. That is not permanent: run the command again whenever you like
-      and the list comes back, with the folders you already have still ticked,
+      offering it. That is not permanent: double-click
+      <strong>Change-my-Assets</strong> in your LangTechDepot folder whenever
+      you like and the list comes back, with the folders you already have still ticked,
       and an <strong>Also display ignored folders</strong> button to bring back
       anything you passed over.
     </div>
     <div class="note">
-      <strong>What the names look like:</strong> each folder is named for the
-      part of the library it carries. The Linux parts have not been moved
-      across yet, so for the moment the only two that are any use on
-      Linux are <code>Android_apps</code> (apps to copy onto a phone or
-      tablet) and <code>Documentation</code>. The others hold Windows
-      installers.
+      <strong>Not sure which?</strong> Each folder is named for the part of
+      the library it carries, and its description says who it is for. Most
+      of them hold Windows installers. For this computer, take
+      <code>Linux</code> &mdash; <em>Linux programs and files useful on a
+      Linux system</em> &mdash; and add others, such as
+      <code>Android_apps</code> (apps to copy onto a phone or tablet), if
+      you need them.
     </div>
     <div class="note">
       <strong>Seeing only a few?</strong> The library is still being moved onto
       this system a folder at a time, so not all of it is on offer yet. You do
-      not need to register again &mdash; when more have arrived, run the
-      installer again and the new ones will be in the list.
+      not need to register again &mdash; when more have arrived, double-click
+      <strong>Change-my-Assets</strong> and the new ones will be in the list.
     </div>
     <p>That is the whole setup. Syncthing starts with your session from now on
     and keeps those folders current by itself. The folders only ever receive
     &mdash; nothing on your machine is sent anywhere.</p>
+    <p>Afterwards, everything is in one place for everyone. Open your file
+    manager and click <strong>LangTechDepot</strong> in the sidebar (it is the
+    folder <code>~/LangTechDepot</code>). Inside it:</p>
+    <ul>
+      <li><strong>Assets</strong> &mdash; the folders of files coming from the
+      depot. (If you chose somewhere else for them, this is a link that takes
+      you there.)</li>
+      <li><strong>Change-my-Assets</strong> &mdash; opens the list again, to
+      add folders, take back ones you ignored, or stop ones you no longer
+      need. If double-clicking it only shows text (GNOME Files on Ubuntu does
+      that), choose <strong>LangTechDepot: Change my Assets</strong> from your
+      applications menu instead.</li>
+      <li><strong>Am I up-to-date, and advanced management</strong> &mdash;
+      opens the Syncthing page (usually <code>localhost:8384</code>) in your
+      browser. When every folder there says <strong>Up to Date</strong>, you
+      have everything. Check it before you travel.</li>
+      <li><strong>READ-ME.txt</strong> &mdash; all of this, for later, with
+      the version number to quote if you ask for help.</li>
+    </ul>
   </section>
 
   <div class="note">

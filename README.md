@@ -146,8 +146,11 @@ bash client/install-langtechdepot.sh
 No admin rights on either platform. The installer sets Syncthing to start
 automatically, registers the machine, and shows the folder list. Syncthing's own
 page is usually at <http://localhost:8384>; the installer prints the actual
-address, since the port moves if something else holds it. Files land under `~/LangTechDepot/` (or
-`%USERPROFILE%\LangTechDepot\Assets\`, or wherever the user pointed it).
+address, since the port moves if something else holds it. Files land under
+`~/LangTechDepot/Assets/` (or `%USERPROFILE%\LangTechDepot\Assets\`, or
+wherever the user pointed it; `Assets` is then a link or shortcut to there).
+On both, the installer keeps itself as `modify-langtechdepot`, which the
+"Change my Assets" item in the LangTechDepot folder runs.
 
 On Linux,
 `langtechdepot-subscribe.sh` lists the catalog and subscribes by folder ID
