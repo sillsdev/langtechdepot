@@ -125,7 +125,7 @@ function Wait-ForReader {
 
 # Path definitions
 $REGISTER_URL = "https://depot.langtech.cloud"
-$HELP_URL     = "https://sillsdev.github.io/langtechdepot/help.html"
+$HELP_URL     = "https://depot.langtech.cloud/help.html"
 
 $BIN_DIR    = "$env:LOCALAPPDATA\Programs\Syncthing"
 $BIN        = "$BIN_DIR\syncthing.exe"
@@ -510,7 +510,7 @@ if ($SERVER_ID) {
     Write-Host "Run setup-langtechdepot.bat and enter your token first. More help: $HELP_URL"
     Exit-Script -Code 1
 } else {
-    Write-Host "No token yet? Register at $REGISTER_URL"
+    Write-Host "No token yet? Register at $REGISTER_URL/signup?os=windows"
     Write-Host ""
     
     $RESPONSE = $null

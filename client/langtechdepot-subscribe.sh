@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-HELP_URL='https://sillsdev.github.io/langtechdepot/help.html'
+HELP_URL='https://depot.langtech.cloud/help.html'
 DATA_ROOT="$HOME/LangTechDepot"
 
 # The Syncthing the installer set up, found exactly as install-langtechdepot.sh

@@ -67,6 +67,7 @@ identity-in-device-name.
 docs/    index.html                     the instructions site: which computer?
          windows.html · linux.html      four steps, with inline-SVG pictures
          help.html                      what normally goes wrong
+         404.html                       any missing path; absolute links only
          assets/site.css · site.js      shared look with register.py's pages
 client/  setup-langtechdepot.ps1        Windows installer - the one copy; edit this
          setup-langtechdepot.bat.in     CMD launcher the .ps1 is wrapped in (owns the pause)
@@ -88,30 +89,35 @@ images/                                 screenshots for intent.md (never served 
 Deploy target is the California repository server. Nothing here is deployed from this
 machine — SETUP.md is followed by hand on that box.
 
-## The two sites are one journey
+## One address, two programs behind it
 
-Field users are not technical and must never be sent to a GitHub page. The entry point
-is the instructions site (`docs/`, published at
-<https://sillsdev.github.io/langtechdepot/>); the README is for maintainers and says so
-in its first line. Four steps: **1** get a token (on the depot server) → **2** download
-→ **3** run it → **4** pick folders. Step 1 lives in `register.py`, the rest on the site,
-and the hand-off runs both ways — the platform pages pass `?os=windows|linux` to the
-form, and the token page sends the user back to the page they came from.
+Field users are not technical and must never be sent to a GitHub page. The one address
+they are given is **`https://depot.langtech.cloud/`**; the README is for maintainers and
+says so in its first line. Four steps: **1** get a token → **2** download → **3** run it
+→ **4** pick folders. Step 1 is `register.py` at `/signup`; the rest is the instructions
+site (`docs/`) at `/`. The hand-off runs both ways — the platform pages pass
+`?os=windows|linux` to the form, and the token page sends the user back to the page they
+came from.
 
-That is why `register.py` duplicates the palette, the step rail and the copy-button
-script from `docs/assets/`: it is one stdlib file that has to render correctly when the
-other site is unreachable. **Change one, change both.**
+Caddy on the depot box joins them (`server/Caddyfile.example`): `/signup`, `/request`,
+`/register`, `/healthz` go to register.py, `/files` to the Groups tree, and everything
+else is **reverse-proxied from GitHub Pages**. CI still publishes only to Pages; nothing
+is deployed to the box for the site. `https://sillsdev.github.io/langtechdepot/` stays
+up as a mirror, and installers from before the switch still link there. Old `/?os=` form
+links redirect to `/signup`. If the site ever stops linking to `/signup`, step 1 breaks:
+change `SIGNUP` and let Pages publish *before* changing Caddy's routes.
 
-The two are meant to merge onto `depot.langtech.cloud` eventually, so everything is
-written to survive it: site links are relative, the Linux `curl` command rewrites itself
-from `window.location`, `DEPOT`/`SIGNUP` in `site.js` and `SITE_URL` in `register.env`
-are the only absolute names, and the form already answers on `/signup` as well as `/`.
-The Caddyfile carries the switch-over recipe.
+`register.py` still duplicates the palette, the step rail and the copy-button script
+from `docs/assets/`: it is one stdlib file that has to render correctly when GitHub is
+unreachable. **Change one, change both.**
 
-**Step 1 is the form at `/`, not a token URL.** Nobody can be linked straight to a
-token — filling the form in is what mints one. `/signup` is a second address for that
-same form, reserved for after the merge; until then the site must link to `/`, because
-that is the only path the deployed service answers on.
+Site links are relative and the Linux `curl` command rewrites itself from
+`window.location`, so the site works from either host. `DEPOT`/`SIGNUP` in `site.js`
+and `SITE_URL` in `register.env` are the only absolute names.
+
+**Step 1 is the form at `/signup`, not a token URL.** Nobody can be linked straight to a
+token — filling the form in is what mints one. register.py answers `/` with the same
+form, but on the deployed host Caddy gives `/` to the site.
 
 ## Versions and releases
 
@@ -234,8 +240,9 @@ only stops the reconciler from re-adding it.
   holding `setup-langtechdepot.bat` (the `.ps1` carried inside it below a marker line)
   and `START-HERE.txt`. Edit only the `.ps1`; run `sh client/build-bat.sh` for a `.bat`
   to test. A committed copy is a second copy, and the second copy goes stale.
-- Service binds localhost only; Caddy terminates TLS and also serves `/files` as a browsable
-  tree of `/data/LT/Groups` for single-installer downloads.
+- Service binds localhost only; Caddy terminates TLS, proxies the instructions site from
+  GitHub Pages, and serves `/files` as a browsable tree of `/data/LT/Groups` for
+  single-installer downloads.
 
 ## Traps
 

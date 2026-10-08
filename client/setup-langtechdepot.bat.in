@@ -21,7 +21,7 @@ REM  those as its own pipe/redirection characters even inside quotes.
 REM =============================================================================
 
 set "PAYLOAD=%TEMP%\langtechdepot-setup-%RANDOM%.ps1"
-set "HELP_URL=https://sillsdev.github.io/langtechdepot/help.html"
+set "HELP_URL=https://depot.langtech.cloud/help.html"
 
 REM The two paths reach PowerShell through environment variables, never
 REM spliced into the -Command text: a path with an apostrophe in it (a user

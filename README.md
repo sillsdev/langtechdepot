@@ -1,7 +1,7 @@
 # langtechdepot
 
 **Setting up a machine? Don't read this page.**
-Go to **<https://sillsdev.github.io/langtechdepot/>** — pictures, four steps,
+Go to **<https://depot.langtech.cloud/>** — pictures, four steps,
 no jargon. This README is for the people who maintain the thing.
 
 ---
@@ -30,13 +30,13 @@ flagged and revertible, and nothing local propagates outward.
 
 ## The four-step journey
 
-A field user crosses between two sites during the install, and they are
-designed as one flow rather than two projects:
+A field user stays on `depot.langtech.cloud` throughout, but two programs
+answer there, designed as one flow rather than two projects:
 
 | Step | What the user does | Where it happens |
 | ---- | ------------------ | ---------------- |
-| 1 | Fills the form, gets a token | `depot.langtech.cloud` — [server/register.py](server/register.py) |
-| 2 | Downloads the installer | the instructions site — [docs/](docs/) |
+| 1 | Fills the form, gets a token | `/signup` — [server/register.py](server/register.py) |
+| 2 | Downloads the installer | `/` — the instructions site, [docs/](docs/) |
 | 3 | Runs it, pastes the token | the installer — [client/](client/) |
 | 4 | Ticks the folders they want | the installer's folder list |
 
@@ -81,12 +81,12 @@ Every link inside the site is relative and the one absolute URL — the `curl`
 command on the Linux page — rewrites itself from `window.location`, so the
 whole tree can be served from anywhere without edits. `DEPOT` and `SIGNUP` at
 the top of [docs/assets/site.js](docs/assets/site.js) are the only two things
-that name the registration server, and they are what the merge changes.
+that name the registration server.
 
-The sign-up form is at `/` on that server, not `/signup` — a user cannot be
-sent straight to a token, because filling that form in is what produces one.
-`/signup` exists as a second address for the same form so that the form still
-has somewhere to live once the site takes over `/`.
+The site links to the sign-up form at `/signup`, not to a token page: a user
+cannot be sent straight to a token, because filling that form in is what
+produces one. register.py also answers `/` with the same form, but on
+`depot.langtech.cloud` Caddy gives `/` to the instructions site.
 
 Two things bite when hand-writing the SVG:
 
@@ -170,9 +170,11 @@ serves the form, issues single-use tokens, admits devices, and keeps the
 catalog shared — and guards it: a change from any device but the server is undone and
 that device cut off. Administration is `register.py admin list|approve|revoke|restore`.
 
-[server/Caddyfile.example](server/Caddyfile.example) carries the recipe for the
-end state: the instructions site served from `depot.langtech.cloud` itself,
-with the form kept at `/signup` so it still has an address of its own.
+[server/Caddyfile.example](server/Caddyfile.example) puts everything on
+`depot.langtech.cloud`: the instructions site at `/` (mirrored from GitHub
+Pages, so nothing is deployed to the box for it), the form at `/signup`, and
+the Groups tree at `/files`. `sillsdev.github.io/langtechdepot` stays up as a
+second copy.
 
 ```bash
 python3 server/test_register.py     # full suite; no network, no real Syncthing
@@ -200,6 +202,6 @@ server/  SETUP.md                    server standup guide
          token_backup.sh             nightly sqlite .backup, 30-day retention
          langtechdepot-register.service   systemd unit
          register.env.example        configuration template
-         Caddyfile.example           TLS front end, and the merge plan
+         Caddyfile.example           TLS front end: site, form and /files on one name
 images/                              screenshots for intent.md
 ```
