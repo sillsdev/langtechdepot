@@ -141,7 +141,7 @@ ISOLATE = {"REGISTER_ENV": os.path.join(TMP, "no-such.env"),
            "SYNCTHING_CONFIG": "", "DB_PATH": DB, "LISTEN_HOST": "127.0.0.1",
            "LISTEN_PORT": "18385", "AUTO_APPROVE": "true", "CATALOG_FOLDERS": "",
            "SMTP_HOST": "", "ADMIN_EMAIL": "", "PUBLIC_URL": "",
-           "SITE_URL": "https://sillsdev.github.io/langtechdepot",
+           "SITE_URL": "https://depot.langtech.cloud",
            "SERVER_ADDRESS": "tcp://langtechdepot.example.org:22000",
            # The service's own guard sweeps once at boot, then waits on events
            # (the stub has none); the tests call guard_folder() themselves.
