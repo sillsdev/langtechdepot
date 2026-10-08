@@ -160,6 +160,31 @@ The script logs every run, and every failure, to the journal; check it with
 journalctl -t token_backup
 ```
 
+### Upgrading register.py
+
+The `cp` above installs a copy, so a change merged on GitHub reaches this box
+only when someone copies it again. From an up-to-date checkout of this repo
+(re-check the local edits asked for above: the folder in `ltd-sync-admin`,
+`BACKUP_DIR` in `token_backup.sh`):
+
+```bash
+cd server
+# Keys the example has and the live register.env lacks. Add them BEFORE the
+# restart: a missing key takes the code's default, which is not always the
+# example's. GUARD_MODE is the one that matters: the code defaults to
+# enforce, the example (and any first deployment of the guard) wants report.
+comm -13 <(grep -o '^[A-Z_]*=' /etc/langtechdepot/register.env | sort)          <(grep -o '^[A-Z_]*=' register.env.example | sort)
+sudo $EDITOR /etc/langtechdepot/register.env
+
+sudo cp register.py /opt/langtechdepot/
+sudo cp langtechdepot-register.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo install -o root -g root -m 755 ltd-sync-admin token_backup.sh /usr/local/bin/
+sudo systemctl restart langtechdepot-register
+journalctl -u langtechdepot-register -n 30     # [boot] line: auto-approve=False
+curl -s http://127.0.0.1:8385/healthz          # {"ok": true}
+```
+
 ## 5. Put TLS in front
 
 The service binds to localhost only. 
@@ -184,17 +209,44 @@ caddy validate --config /etc/caddy/Caddyfile # fix any errors
 sudo systemctl reload caddy
 ```
 
-So that the tree of folders can be displayed
-as well as sync tokens provided,
-the Caddyfile sets up this arrangement:
+The Caddyfile puts the whole field-user journey on this one name:
 
-depot.langtech.cloud *gives out tokens*
-depot.langtech.cloud/files *displays folders for getting a single installer*
+| Address | What answers |
+| --- | --- |
+| `depot.langtech.cloud/` | the instructions site, mirrored from GitHub Pages |
+| `depot.langtech.cloud/signup` | the token form (register.py) |
+| `depot.langtech.cloud/files` | the Groups tree, for getting a single installer |
 
-Requires ports **80 and 443** open and the hostname pointed at this box. Visit
-`https://<hostname>/` — you should get the registration form. Both client
-installers already carry this URL in `REGISTER_URL`; change it there only if
-the hostname ever changes.
+`/request`, `/register` and `/healthz` also go to register.py. Old links to
+the form at `/?os=…` are redirected to `/signup?os=…`. Nothing is deployed
+here for the site: CI publishes to GitHub Pages and Caddy fetches from there.
+
+Set `SITE_URL=https://depot.langtech.cloud` in `register.env` (and restart the
+service) so the form's links back to the instructions stay on this host. Do it
+in the same sitting as the Caddy switch, not before: until Caddy serves the
+site at `/`, that address is the form itself.
+
+Both client installers already carry `https://depot.langtech.cloud` in
+`REGISTER_URL`; change it there only if the hostname ever changes.
+
+Requires ports **80 and 443** open and the hostname pointed at this box. Then
+check:
+
+```bash
+curl -s https://depot.langtech.cloud/ | grep -o '<title>[^<]*'         # the instructions
+curl -s https://depot.langtech.cloud/signup | grep -q 'Get my token' && echo form
+curl -sI 'https://depot.langtech.cloud/?os=windows' | grep -i location  # /signup?os=windows
+curl -sI https://depot.langtech.cloud/downloads/langtechdepot-windows.zip | head -1  # 200
+```
+
+The second check needs the current register.py (October 2026 or later; the
+older one said "Send me a token"). See "Upgrading register.py" in §4.
+
+If the form ever moves off `/signup`: first make register.py and Caddy answer
+at the new path *as well as* the old one, then change `SIGNUP` in
+`docs/assets/site.js` and let Pages publish, and only then drop the old route.
+The site's step-1 buttons must never point at a path nothing answers.
+
 ## 6. Day-to-day administration
 
 ```bash

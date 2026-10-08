@@ -61,10 +61,10 @@ LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8385"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 # The instructions site. It owns steps 2-4 of the journey and this service owns
-# step 1, so every page here links back to it and it links here. One variable
-# because the two are meant to merge: when the site is served from this host,
-# point this at that path and nothing else changes.
-SITE_URL = os.environ.get("SITE_URL", "https://sillsdev.github.io/langtechdepot").rstrip("/")
+# step 1, so every page here links back to it and it links here. Caddy serves
+# it at "/" on this same host, mirrored from GitHub Pages; github.io is the
+# fallback copy, and pointing this back at it is the only change needed.
+SITE_URL = os.environ.get("SITE_URL", "https://depot.langtech.cloud").rstrip("/")
 # Off unless asked for: with introducer mode on, every approved device can
 # reach every field machine (see the guard below), so a person checks first.
 AUTO_APPROVE = os.environ.get("AUTO_APPROVE", "false").lower() not in ("0", "false", "no")
@@ -636,9 +636,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/healthz":
             self._json(200, {"ok": True})
         # Nobody can be sent straight to a token: the token is what this form
-        # gives back. /signup is the same form under a name of its own, so the
-        # instructions site can take over this host's "/" later without the
-        # form losing its address.
+        # gives back. /signup is the form's public address: on the deployed
+        # host Caddy gives "/" to the instructions site, so "/" reaches this
+        # only when the service is run on its own.
         elif path in ("/", "/signup"):
             query = urllib.parse.parse_qs(parsed.query)
             osname = pick_os(query.get("os", [""])[0])
@@ -717,7 +717,7 @@ class Handler(BaseHTTPRequestHandler):
             osname = pick_os(form.get("os", [""])[0])
             if not EMAIL_RE.match(email):
                 self._page(400, "<h1>Check your email address</h1>"
-                                f'<p><a href="/?os={osname}">Back to the form</a></p>',
+                                f'<p><a href="/signup?os={osname}">Back to the form</a></p>',
                            "check your email address")
                 return
             token, emailed = issue_token(email, person, org, location)
