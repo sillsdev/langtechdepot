@@ -21,12 +21,25 @@ REM  those as its own pipe/redirection characters even inside quotes.
 REM =============================================================================
 
 set "PAYLOAD=%TEMP%\langtechdepot-setup-%RANDOM%.ps1"
+set "HELP_URL=https://sillsdev.github.io/langtechdepot/help.html"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$m='#--LANGTECHDEPOT-PS1-PAYLOAD-BELOW--#';$l=[System.IO.File]::ReadAllLines('%~f0');$i=-1;for($j=0;$j -lt $l.Length;$j++){if($l[$j] -eq $m){$i=$j+1;break}};if($i -lt 0){Write-Error 'Could not find the embedded installer inside this file.';exit 1};[System.IO.File]::WriteAllLines('%PAYLOAD%',$l[$i..($l.Length-1)])"
+REM The two paths reach PowerShell through environment variables, never
+REM spliced into the -Command text: a path with an apostrophe in it (a user
+REM called O'Brien, whose %TEMP% is C:\Users\O'Brien\...) would end a quoted
+REM PowerShell string early and break the command. $env:... is read as data.
+REM The payload is written as UTF-8 with a byte-order mark, which Windows
+REM PowerShell needs to read anything non-ASCII in a .ps1 correctly.
+REM Exit code 3 means Group Policy enforces an execution policy that
+REM -ExecutionPolicy Bypass cannot override (see :policy below).
+set "LTD_SELF=%~f0"
+set "LTD_PAYLOAD=%PAYLOAD%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$m='#--LANGTECHDEPOT-PS1-PAYLOAD-BELOW--#';$l=[System.IO.File]::ReadAllLines($env:LTD_SELF);$i=-1;for($j=0;$j -lt $l.Length;$j++){if($l[$j] -eq $m){$i=$j+1;break}};if($i -lt 0){Write-Error 'Could not find the embedded installer inside this file.';exit 1};[System.IO.File]::WriteAllLines($env:LTD_PAYLOAD,$l[$i..($l.Length-1)],[System.Text.Encoding]::UTF8);foreach($h in 'HKEY_LOCAL_MACHINE','HKEY_CURRENT_USER'){$k=$h+'\SOFTWARE\Policies\Microsoft\Windows\PowerShell';$p=[string][Microsoft.Win32.Registry]::GetValue($k,'ExecutionPolicy',$null);$en=[Microsoft.Win32.Registry]::GetValue($k,'EnableScripts',$null);if((@('AllSigned','Restricted') -contains $p) -or ($en -eq 0)){exit 3}}"
+if "%ERRORLEVEL%"=="3" goto policy
 
 if not exist "%PAYLOAD%" (
     echo Something went wrong extracting the installer from this file.
-    echo Please try downloading it again.
+    echo Please try downloading it again. If that does not help, see:
+    echo     %HELP_URL%
     echo.
     pause
     exit /b 1
@@ -56,5 +69,20 @@ if "%~1"=="" (
     pause
 )
 exit /b %RC%
+
+:policy
+REM Group Policy (set by whoever manages this computer) requires signed
+REM PowerShell scripts, and that overrides -ExecutionPolicy Bypass. Nothing
+REM this file can do gets round it, so say so plainly rather than leave the
+REM user with PowerShell's own error.
+del "%PAYLOAD%" >nul 2>&1
+echo.
+echo This computer's settings, chosen by whoever manages it, do not allow
+echo the LangTechDepot installer to run. Please show this message to your
+echo IT support, or see:
+echo     %HELP_URL%
+echo.
+pause
+exit /b 1
 
 #--LANGTECHDEPOT-PS1-PAYLOAD-BELOW--#

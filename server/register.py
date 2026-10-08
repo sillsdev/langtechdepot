@@ -26,12 +26,14 @@ Run:  python3 register.py                 # the service
 """
 
 import html
+import ipaddress
 import json
 import os
 import re
 import secrets
 import smtplib
 import sqlite3
+import ssl
 import sys
 import threading
 import time
@@ -42,11 +44,12 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import os
 from dotenv import load_dotenv
 
-# Load the file directly if it exists (ignores it if it doesn't)
-load_dotenv('/etc/langtechdepot/register.env')
+# Load the file directly if it exists (ignores it if it doesn't). Variables
+# already in the environment win. REGISTER_ENV exists so the test suite can
+# point this somewhere empty when it runs on the server itself.
+load_dotenv(os.environ.get("REGISTER_ENV", "/etc/langtechdepot/register.env"))
 
 # Canonical Syncthing device ID: 8 dash-separated groups of 7 base32 chars.
 DEVICE_ID_RE = re.compile(r"^[A-Z2-7]{7}(-[A-Z2-7]{7}){7}$")
@@ -62,7 +65,9 @@ PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 # because the two are meant to merge: when the site is served from this host,
 # point this at that path and nothing else changes.
 SITE_URL = os.environ.get("SITE_URL", "https://sillsdev.github.io/langtechdepot").rstrip("/")
-AUTO_APPROVE = os.environ.get("AUTO_APPROVE", "true").lower() not in ("0", "false", "no")
+# Off unless asked for: with introducer mode on, every approved device can
+# reach every field machine (see the guard below), so a person checks first.
+AUTO_APPROVE = os.environ.get("AUTO_APPROVE", "false").lower() not in ("0", "false", "no")
 CATALOG_FOLDERS = {f.strip() for f in os.environ.get("CATALOG_FOLDERS", "").split(",") if f.strip()}
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
@@ -72,10 +77,18 @@ SMTP_PASS = os.environ.get("SMTP_PASS", "")
 MAIL_FROM = os.environ.get("MAIL_FROM", "langtechdepot@sil.org")
 
 # Registration is cheap but not free: cap attempts per client address so a
-# script cannot mint tokens or grind at /register unbounded.
-RATE_LIMIT = (10, 3600)  # attempts, seconds
-_rate: dict[str, list[float]] = {}
+# script cannot mint tokens or grind at /register unbounded. The form mints a
+# token and sends mail, so it is the tighter bucket; the installer may retry
+# (the Linux one POSTs twice per failed attempt to read the reason).
+RATE_LIMITS = {"request": (10, 3600), "register": (30, 3600)}  # attempts, seconds
+_rate: dict[tuple[str, str], list[float]] = {}
 _rate_lock = threading.Lock()
+_rate_pruned = 0.0
+
+# Syncthing's config PATCH is read-modify-write on the device list, and both
+# the request threads and the reconciler do it. Serialise them, or two
+# concurrent writers each drop the other's device.
+_share_lock = threading.Lock()
 
 
 def now() -> str:
@@ -97,13 +110,13 @@ def api_key() -> str:
 KEY = api_key()
 
 
-def st(method: str, path: str, body=None):
+def st(method: str, path: str, body=None, timeout: float = 30):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         SYNCTHING_URL + path, data=data, method=method,
         headers={"X-API-Key": KEY, "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
     return json.loads(raw) if raw else None
 
@@ -126,18 +139,31 @@ def db() -> sqlite3.Connection:
         revoked_at  TEXT
     )""")
     conn.commit()
-    # Set permissions on DB_PATH to 640, so not readable by Others.
-    os.chmod(DB_PATH, 0o640)
+    # Set permissions on DB_PATH to 640, so not readable by Others. Only the
+    # owner may chmod: if root created the file (`sudo ltd-sync-admin` before
+    # the service's first start) the service must still come up.
+    try:
+        os.chmod(DB_PATH, 0o640)
+    except OSError:
+        pass
     return conn
 
 
-def rate_ok(addr: str) -> bool:
-    limit, window = RATE_LIMIT
-    cutoff = time.monotonic() - window
+def rate_ok(bucket: str, addr: str) -> bool:
+    global _rate_pruned
+    limit, window = RATE_LIMITS[bucket]
+    t = time.monotonic()
+    cutoff = t - window
     with _rate_lock:
-        hits = [t for t in _rate.get(addr, []) if t > cutoff]
-        hits.append(time.monotonic())
-        _rate[addr] = hits
+        # Drop addresses with no recent hits, so the table does not grow for
+        # as long as the service runs.
+        if t - _rate_pruned > 300:
+            for k in [k for k, v in _rate.items() if not v or v[-1] <= cutoff]:
+                del _rate[k]
+            _rate_pruned = t
+        hits = [h for h in _rate.get((bucket, addr), []) if h > cutoff]
+        hits.append(t)
+        _rate[(bucket, addr)] = hits
         return len(hits) <= limit
 
 
@@ -153,7 +179,7 @@ def send_mail(to: str, subject: str, body: str) -> bool:
     msg.set_content(body)
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-            s.starttls()
+            s.starttls(context=ssl.create_default_context())
             if SMTP_USER:
                 s.login(SMTP_USER, SMTP_PASS)
             s.send_message(msg)
@@ -173,7 +199,14 @@ def share_catalog_with(device_ids: set[str]) -> list[str]:
     each folder is Send Only. PATCH replaces child arrays wholesale, so the
     device list is read-modify-write rather than append. Only the keys that
     are actually wrong go into the payload, and the journal line says which,
-    so "flipped to sendonly" is never reported for a folder that already was."""
+    so "flipped to sendonly" is never reported for a folder that already was.
+    Holds _share_lock throughout, so the read and the write cannot interleave
+    with another thread's."""
+    with _share_lock:
+        return _share_catalog_with(device_ids)
+
+
+def _share_catalog_with(device_ids: set[str]) -> list[str]:
     touched = []
     for folder in st("GET", "/rest/config/folders") or []:
         fid = folder["id"]
@@ -199,7 +232,7 @@ def share_catalog_with(device_ids: set[str]) -> list[str]:
         if not patch:
             continue
 
-        st("PATCH", f"/rest/config/folders/{fid}", patch)
+        st("PATCH", f"/rest/config/folders/{urllib.parse.quote(fid, safe='')}", patch)
         print(f"[reconcile] {fid}: {', '.join(changed)}", flush=True)
     return touched
 
@@ -213,6 +246,11 @@ def register_device(token: str, device_id: str, device_name: str) -> dict:
 
     conn = db()
     try:
+        # Revoking deletes the device from Syncthing; without this check a
+        # fresh token from the form would put it straight back.
+        if conn.execute("SELECT 1 FROM tokens WHERE device_id = ? AND revoked_at IS NOT NULL "
+                        "LIMIT 1", (device_id,)).fetchone():
+            raise ValueError("access for this machine has been revoked")
         row = conn.execute("SELECT * FROM tokens WHERE token = ?", (token,)).fetchone()
         if row is None:
             raise ValueError("unknown token")
@@ -223,24 +261,42 @@ def register_device(token: str, device_id: str, device_name: str) -> dict:
         if row["used_at"] and row["device_id"] != device_id:
             raise ValueError("token has already been used on another machine")
 
-        existing = {d["deviceID"] for d in st("GET", "/rest/config/devices") or []}
-        if device_id not in existing:
-            st("POST", "/rest/config/devices", {
-                "deviceID": device_id,
-                "name": device_name,     # deliberately carries no token: peers see this
-                "addresses": ["dynamic"],
-            })
-        folders = share_catalog_with({device_id})
-
-        conn.execute(
-            "UPDATE tokens SET used_at = ?, device_id = ?, device_name = ? WHERE token = ?",
-            (now(), device_id, device_name, token),
-        )
+        # Claim the token before touching Syncthing, atomically: the checks
+        # above are a read, and two installers racing on one token would both
+        # pass them. Only one UPDATE can win. A fresh claim is released again
+        # if Syncthing then fails, so the user can retry with the same token;
+        # the same device re-running the installer is accepted as before.
+        claim = ("UPDATE tokens SET used_at = ?, device_id = ?, device_name = ? "
+                 "WHERE token = ? AND revoked_at IS NULL AND approved = 1 AND ")
+        fresh = conn.execute(claim + "used_at IS NULL",
+                             (now(), device_id, device_name, token)).rowcount == 1
+        if not fresh and conn.execute(claim + "device_id = ?",
+                                      (now(), device_id, device_name, token, device_id)
+                                      ).rowcount != 1:
+            conn.rollback()
+            raise ValueError("token has already been used on another machine")
         conn.commit()
+
+        try:
+            existing = {d["deviceID"] for d in st("GET", "/rest/config/devices") or []}
+            if device_id not in existing:
+                st("POST", "/rest/config/devices", {
+                    "deviceID": device_id,
+                    "name": device_name,     # deliberately carries no token: peers see this
+                    "addresses": ["dynamic"],
+                })
+            folders = share_catalog_with({device_id})
+            me = st("GET", "/rest/system/status") or {}
+        except BaseException:
+            if fresh:
+                conn.execute("UPDATE tokens SET used_at = NULL, device_id = NULL, "
+                             "device_name = NULL WHERE token = ? AND device_id = ?",
+                             (token, device_id))
+                conn.commit()
+            raise
     finally:
         conn.close()
 
-    me = st("GET", "/rest/system/status") or {}
     server_id = me.get("myID", "")
     addresses = ["dynamic"]
     extra = os.environ.get("SERVER_ADDRESS", "")
@@ -265,19 +321,28 @@ def issue_token(email: str, person: str, org: str, location: str) -> tuple[str, 
         conn.close()
 
     if ADMIN_EMAIL:
-        send_mail(ADMIN_EMAIL, "LangTechDepot registration",
-                  f"{person or '(no name)'} <{email}>\norg: {org}\nlocation: {location}\n"
-                  f"approved: {AUTO_APPROVE}\n")
+        who = f"{person or '(no name)'} <{email}>\norg: {org}\nlocation: {location}\n"
+        if AUTO_APPROVE:
+            send_mail(ADMIN_EMAIL, "LangTechDepot registration", who + "approved: True\n")
+        else:
+            # The token is useless until approved, and approving mails it to
+            # the applicant anyway; carrying it here saves a `list` lookup.
+            send_mail(ADMIN_EMAIL, f"LangTechDepot: approve {email}?",
+                      who + "\nEvery approved device can reach every field machine, so check\n"
+                      "this is a real person before approving. On the server:\n\n"
+                      f"    ltd-sync-admin approve {token}\n\n"
+                      "That emails the token to them. To refuse, do nothing.\n")
     if not AUTO_APPROVE:
         return token, False
-    emailed = send_mail(
-        email, "Your LangTechDepot access token",
-        f"Paste this token into the LangTechDepot installer when it asks:\n\n    {token}\n\n"
-        "It works once, on one machine. Need another machine? Register again.\n\n"
-        f"Step-by-step instructions, with pictures:\n\n    {SITE_URL}/\n\n"
-        "Stuck? Reply to this message.\n",
-    )
+    emailed = send_mail(email, "Your LangTechDepot access token", token_mail(token))
     return token, emailed
+
+
+def token_mail(token: str) -> str:
+    return (f"Paste this token into the LangTechDepot installer when it asks:\n\n    {token}\n\n"
+            "It works once, on one machine. Need another machine? Register again.\n\n"
+            f"Step-by-step instructions, with pictures:\n\n    {SITE_URL}/\n\n"
+            "Stuck? Reply to this message.\n")
 
 
 # --- HTTP ---------------------------------------------------------------------
@@ -436,9 +501,16 @@ def next_step_url(osname: str) -> str:
 
 
 def form_page(osname: str) -> str:
+    if AUTO_APPROVE:
+        lede = ("One short form. The next page gives you a token &mdash; a password that "
+                "works once, on one machine &mdash; and we email you a copy. You paste it "
+                "into the installer.")
+    else:
+        lede = ("One short form. We check each request by hand, then email you a token "
+                "&mdash; a password that works once, on one machine &mdash; to paste into "
+                "the installer.")
     return f"""<h1>Get your token</h1>
-<p class=lede>One short form. We email you a token &mdash; a password that works
-once, on one machine &mdash; and you paste it into the installer.</p>
+<p class=lede>{lede}</p>
 {RAIL_FORM}
 <form method=post action=/request class=card>
  <input type=hidden name=os value="{html.escape(osname)}">
@@ -448,7 +520,7 @@ once, on one machine &mdash; and you paste it into the installer.</p>
  <input id=org name=org>
  <label for=location>Where you work <span class=opt>&mdash; optional</span></label>
  <input id=location name=location placeholder="country or region">
- <button type=submit>Send me a token</button>
+ <button type=submit>Get my token</button>
 </form>
 <div class=note><strong>Setting up a second machine?</strong>
 Fill this in again. Each machine needs its own token.</div>
@@ -469,8 +541,8 @@ def token_page(token: str, osname: str, email: str, emailed: bool) -> str:
         mail_line = (f"<p>A copy is on its way to <code>{html.escape(email)}</code>, "
                      "which is handy if you are installing on a different machine from this one.</p>")
     else:
-        mail_line = ("<p>We could not send this by email, so this page is the only "
-                     "copy. Copy it before you leave.</p>")
+        mail_line = ("<p>This page is the only copy of your token. Copy it now, "
+                     "before you leave the page.</p>")
     return f"""<h1>Here is your token</h1>
 <p class=lede>It works once, on one machine. Copy it now &mdash; then go back and
 run the installer.</p>
@@ -482,7 +554,7 @@ run the installer.</p>
  </div>
  {mail_line}
 </div>
-<a class="btn big" href="{next_step_url(osname)}">Next: download the installer &rarr;</a>
+<a class="btn big" href="{next_step_url(osname)}">Next: {"open a terminal" if osname == "linux" else "download the installer"} &rarr;</a>
 <span class=sub-btn>Leave this page open until the installer has asked you for
 the token.</span>
 <div class=note><strong>Keep it to yourself.</strong>
@@ -499,9 +571,32 @@ def pick_os(value: str) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "langtechdepot-register"
+    # Socket timeout per read/write: a client that opens a connection and then
+    # trickles (or never sends) its body releases its thread after this long.
+    timeout = 20
+
+    def client_ip(self) -> str:
+        """The address to rate-limit and log. Behind Caddy every peer is
+        loopback, so then the real client is the last X-Forwarded-For entry:
+        the one Caddy itself appended. Anything earlier in the header came
+        from the client and is not trusted. The service binds localhost only,
+        so a loopback peer is always the proxy (or someone on this box)."""
+        peer = self.client_address[0]
+        try:
+            loopback = ipaddress.ip_address(peer).is_loopback
+        except ValueError:
+            loopback = False
+        headers = getattr(self, "headers", None)
+        if loopback and headers is not None:
+            last = (headers.get("X-Forwarded-For") or "").split(",")[-1].strip()
+            try:
+                return str(ipaddress.ip_address(last))
+            except ValueError:
+                pass
+        return peer
 
     def log_message(self, fmt, *args):
-        print(f"[http] {self.address_string()} {fmt % args}", flush=True)
+        print(f"[http] {self.client_ip()} {fmt % args}", flush=True)
 
     def _send(self, code: int, body: bytes, ctype: str):
         self.send_response(code)
@@ -509,8 +604,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        # The token page must not sit in a browser or proxy cache, and no page
+        # here has any business inside someone else's frame.
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy",
+                         "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers()
         self.wfile.write(body)
+
+    def _fail(self, path: str, code: int, message: str):
+        """An error in the shape the caller reads: JSON for the installer,
+        a page for a browser."""
+        if path == "/register":
+            self._json(code, {"ok": False, "error": message})
+        else:
+            self._page(code, f"<h1>{html.escape(message)}</h1>")
 
     def _page(self, code: int, body: str, title: str = "register"):
         page = (PAGE.replace("@@TITLE@@", title)
@@ -540,13 +649,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
-        length = int(self.headers.get("Content-Length") or 0)
+        # An unread body would be parsed as the next request on a kept-alive
+        # connection, so every early rejection below also closes it.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if length < 0:
+            self.close_connection = True
+            self._fail(path, 400, "bad Content-Length")
+            return
         if length > 64_000:
-            self._json(413, {"ok": False, "error": "too large"})
+            self.close_connection = True
+            self._fail(path, 413, "too large")
             return
         raw = self.rfile.read(length)
 
-        if not rate_ok(self.client_address[0]):
+        bucket = "register" if path == "/register" else "request"
+        if not rate_ok(bucket, self.client_ip()):
             if path == "/register":
                 self._json(429, {"ok": False, "error": "too many attempts; try again later"})
             else:
@@ -556,14 +676,32 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/register":
             try:
                 payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise ValueError("expected a JSON object")
                 result = register_device(
                     str(payload["token"]).strip(),
                     str(payload["deviceID"]).strip().upper(),
                     str(payload.get("deviceName", "")).strip(),
                 )
-            except (KeyError, ValueError, json.JSONDecodeError) as exc:
+            except KeyError as exc:
+                self._json(400, {"ok": False, "error": f"missing field {exc}"})
+            except ValueError as exc:  # includes JSONDecodeError, UnicodeDecodeError
                 self._json(400, {"ok": False, "error": str(exc)})
-            except urllib.error.URLError as exc:
+            except urllib.error.HTTPError as exc:
+                # Syncthing answered and said no - typically a device ID that
+                # fits the pattern but fails its check digits. Retrying the
+                # same thing will not help, so do not say "busy".
+                detail = ""
+                try:
+                    detail = exc.read(300).decode("utf-8", "replace").strip().splitlines()[0]
+                except Exception:  # noqa: BLE001 - the detail is a courtesy
+                    pass
+                print(f"[register] syncthing refused: HTTP {exc.code} {detail}", flush=True)
+                self._json(502, {"ok": False, "error":
+                                 "the depot server could not add this machine"
+                                 + (f" (Syncthing said: {detail})" if detail else "")
+                                 + ". Check the device ID; trying again will not help."})
+            except OSError as exc:  # URLError, timeouts, refused connections
                 print(f"[register] syncthing unreachable: {exc}", flush=True)
                 self._json(503, {"ok": False, "error": "server busy; try again shortly"})
             else:
@@ -585,10 +723,15 @@ class Handler(BaseHTTPRequestHandler):
             token, emailed = issue_token(email, person, org, location)
             if not AUTO_APPROVE:
                 self._page(200, "<h1>Request received</h1>"
-                                "<p class=lede>Someone will review it and email your token. "
-                                "Nothing more to do until it arrives.</p>"
-                                f'<p><a href="{next_step_url(osname)}">Back to the '
-                                "instructions</a> &mdash; steps 2 to 4 are waiting there.</p>",
+                                "<p class=lede>We check each request by hand, then email "
+                                f"your token to <code>{html.escape(email)}</code>.</p>"
+                                "<div class=card><p>It comes from <code>depot@langtech.cloud</code>. "
+                                "If it has not arrived, look in your spam or junk folder before "
+                                "asking.</p></div>"
+                                f'<a class="btn big" href="{next_step_url(osname)}">'
+                                "While you wait: back to the instructions &rarr;</a>"
+                                "<span class=sub-btn>You can download the installer now. It "
+                                "asks for the token when it needs it.</span>",
                            "request received")
             else:
                 self._page(200, token_page(token, osname, email, emailed), "your token")
@@ -606,7 +749,11 @@ def reconcile_loop():
             conn = db()
             rows = conn.execute(
                 "SELECT DISTINCT device_id FROM tokens "
-                "WHERE device_id IS NOT NULL AND revoked_at IS NULL"
+                "WHERE device_id IS NOT NULL AND revoked_at IS NULL "
+                # A device revoked under any token stays out, even if
+                # another of its tokens was never revoked.
+                "AND device_id NOT IN (SELECT device_id FROM tokens "
+                "WHERE revoked_at IS NOT NULL AND device_id IS NOT NULL)"
             ).fetchall()
             conn.close()
             ids = {r["device_id"] for r in rows if r["device_id"]}
@@ -616,13 +763,162 @@ def reconcile_loop():
             print(f"[reconcile] {exc}", flush=True)
 
 
+# --- guard --------------------------------------------------------------------
+#
+# Introducer mode is what lets an office LAN share one download, and it means
+# every registered device is introduced to every field machine. A receive-only
+# folder accepts newer files from *any* device it shares with, not only from
+# this server, so one registrant whose own copy is Send & Receive - malicious,
+# or a user who clicked the wrong option - could push a changed file to the
+# whole cluster. Syncthing cannot be told "accept only the server's versions".
+#
+# What it does give us: on this server every catalog folder is Send Only, so
+# the only way the server can "need" anything is a version that some *other*
+# device made, and each version records who made it (modifiedBy). Honest
+# clients never make one - receive-only changes are not announced. So: any
+# need on a catalog folder names its culprit. Cut that device off (the
+# introducer then removes it from every client) and Override, which makes
+# this server's copy the newest again so the clients pull it back.
+
+GUARD_SWEEP = int(os.environ.get("GUARD_SWEEP", "300"))  # full check, seconds
+# report = log and mail what it would do, change nothing. For the first run
+# after deploying, when old, honest clients may already have changes pending.
+GUARD_MODE = os.environ.get("GUARD_MODE", "enforce").strip().lower()
+
+
+def _q(s: str) -> str:
+    return urllib.parse.quote(s, safe="")
+
+
+def cut_off(device_id: str, reason: str) -> None:
+    """Revoke a device the guard caught. Flag first, as `admin revoke` does,
+    so neither the reconciler nor a fresh token can bring it straight back.
+    A device with no row of ours still gets one, for the same reason."""
+    conn = db()
+    try:
+        stamp = now()
+        if conn.execute("UPDATE tokens SET revoked_at = COALESCE(revoked_at, ?) "
+                        "WHERE device_id = ?", (stamp, device_id)).rowcount == 0:
+            conn.execute("INSERT OR IGNORE INTO tokens (token, email, person, issued_at, "
+                         "approved, device_id, revoked_at) VALUES (?, '(guard)', ?, ?, 0, ?, ?)",
+                         ("guard:" + device_id, reason[:200], stamp, device_id, stamp))
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        st("DELETE", "/rest/config/devices/" + _q(device_id))
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+
+
+def guard_folder(fid: str) -> list[str]:
+    """If anything but this server has changed catalog folder `fid`, cut the
+    changer off and put the server's copy back. Returns the device IDs cut off."""
+    status = st("GET", f"/rest/db/status?folder={_q(fid)}") or {}
+    if not status.get("needTotalItems"):
+        return []
+
+    names: list[str] = []
+    need = st("GET", f"/rest/db/need?folder={_q(fid)}&perpage=200") or {}
+    for key in ("progress", "queued", "rest"):
+        names += [f.get("name", "") for f in need.get(key) or []]
+    names = [n for n in names if n]
+
+    my_id = (st("GET", "/rest/system/status") or {}).get("myID", "")
+    devices = [my_id] + [d["deviceID"] for d in st("GET", "/rest/config/devices") or []]
+    culprits: set[str] = set()
+    ours = False
+    for name in names[:200]:
+        info = st("GET", f"/rest/db/file?folder={_q(fid)}&file={_q(name)}") or {}
+        by = ((info.get("global") or {}).get("modifiedBy") or "").upper()
+        if not by:
+            continue
+        # modifiedBy is the short form: the first group of the device ID.
+        dev = next((d for d in devices if d == by or d.split("-")[0] == by), "")
+        if dev and dev != my_id:
+            culprits.add(dev)
+        ours = ours or dev == my_id
+
+    files = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+    if GUARD_MODE == "report":
+        who = ", ".join(sorted(culprits)) or ("this server" if ours else "unknown")
+        print(f"[guard] REPORT ONLY {fid}: {len(names)} item(s) changed by {who}; "
+              f"would cut off and override ({files})", flush=True)
+        if ADMIN_EMAIL and culprits:
+            send_mail(ADMIN_EMAIL, f"LangTechDepot guard (report only): {fid}",
+                      f"Folder {fid} has changes from: {who}\nItems: {files}\n\n"
+                      "GUARD_MODE=report, so nothing was done. In enforce mode these\n"
+                      "devices would be cut off and the folder overridden.\n")
+        return []
+
+    for dev in sorted(culprits):
+        cut_off(dev, f"changed {fid}")
+    # Cut off before Override: the other way round, the culprit could answer
+    # the override with yet another newer version.
+    st("POST", f"/rest/db/override?folder={_q(fid)}")
+
+    who = (", ".join(sorted(culprits)) + "; cut off" if culprits else
+           "this server's own older index" if ours else "a device no longer known")
+    print(f"[guard] {fid}: {len(names)} item(s) changed by {who}; overridden ({files})",
+          flush=True)
+    if ADMIN_EMAIL and culprits:
+        send_mail(ADMIN_EMAIL, f"LangTechDepot: foreign change to {fid} undone",
+                  f"Folder {fid} was changed by a device other than the depot server.\n\n"
+                  f"Device(s) cut off: {who}\nItems: {files}\n\n"
+                  "The server's copy has been made the newest again (Override), so field\n"
+                  "machines will pull it back. `ltd-sync-admin list` shows whose device it\n"
+                  "was. If it was an honest mistake - someone switched the folder to\n"
+                  "Send & Receive - have them set it back to Receive Only, then run\n"
+                  "`ltd-sync-admin restore <device-id>`.\n")
+    return sorted(culprits)
+
+
+def guard_all() -> None:
+    for fid in catalog_folder_ids():
+        try:
+            guard_folder(fid)
+        except Exception as exc:  # noqa: BLE001 - one bad folder must not hide the rest
+            print(f"[guard] {fid}: {exc}", flush=True)
+
+
+def guard_loop():
+    """React within seconds via Syncthing's event stream (FolderSummary follows
+    every index change), and sweep everything every GUARD_SWEEP seconds in case
+    an event was missed - e.g. Syncthing restarted and its event IDs began
+    again from 1."""
+    since, sweep_due, last_uptime = 0, 0.0, -1
+    while True:
+        try:
+            if time.monotonic() >= sweep_due:
+                uptime = (st("GET", "/rest/system/status") or {}).get("uptime", 0)
+                if uptime < last_uptime:
+                    since = 0
+                last_uptime = uptime
+                guard_all()
+                sweep_due = time.monotonic() + GUARD_SWEEP
+            events = st("GET", f"/rest/events?events=FolderSummary&since={since}&timeout=60",
+                        timeout=90) or []
+            catalog = set(catalog_folder_ids()) if events else set()
+            for ev in events:
+                since = max(since, ev.get("id", 0))
+                data = ev.get("data") or {}
+                if (data.get("folder") in catalog
+                        and (data.get("summary") or {}).get("needTotalItems")):
+                    guard_folder(data["folder"])
+        except Exception as exc:  # noqa: BLE001 - the guard must outlive any one error
+            print(f"[guard] {exc}", flush=True)
+            time.sleep(10)
+
+
 # --- admin --------------------------------------------------------------------
 
 def admin(argv: list[str]) -> None:
     if not argv or argv[0] in ("-h", "--help", "help"):
         print("usage: register.py admin list [--pending]\n"
               "       register.py admin approve <token>\n"
-              "       register.py admin revoke <email|device-id|token>")
+              "       register.py admin revoke <email|device-id|token>\n"
+              "       register.py admin restore <device-id>")
         return
 
     cmd, rest = argv[0], argv[1:]
@@ -647,10 +943,11 @@ def admin(argv: list[str]) -> None:
                 sys.exit("no such token")
             conn.execute("UPDATE tokens SET approved = 1 WHERE token = ?", (rest[0],))
             conn.commit()
-            send_mail(row["email"], "Your LangTechDepot access token",
-                      f"Paste this token into the LangTechDepot installer when it asks:\n\n"
-                      f"    {rest[0]}\n\nIt works once, on one machine.\n")
-            print(f"approved {row['email']}")
+            if send_mail(row["email"], "Your LangTechDepot access token", token_mail(rest[0])):
+                print(f"approved {row['email']}; token emailed")
+            else:
+                print(f"approved {row['email']}, but the mail did not go: send them "
+                      f"{rest[0]} yourself")
 
         elif cmd == "revoke":
             if not rest:
@@ -662,18 +959,50 @@ def admin(argv: list[str]) -> None:
             ).fetchall()
             if not rows:
                 sys.exit("nothing matched")
+            # Flag first and commit, then delete from Syncthing. The other way
+            # round, the reconciler (every 60 s) or a re-register could re-add
+            # the device between the delete and the flag. The flag also makes
+            # register_device refuse this device ID from now on, whatever token
+            # it brings.
+            stamp = now()
             for r in rows:
-                # Removing the device from Syncthing is what actually cuts access;
-                # the DB flag only keeps the reconciler from re-adding it.
+                conn.execute("UPDATE tokens SET revoked_at = COALESCE(revoked_at, ?) "
+                             "WHERE token = ?", (stamp, r["token"]))
+            conn.commit()
+            for r in rows:
+                # Removing the device from Syncthing is what actually cuts access.
                 if r["device_id"]:
                     try:
-                        st("DELETE", f"/rest/config/devices/{r['device_id']}")
+                        st("DELETE", "/rest/config/devices/"
+                                     + urllib.parse.quote(r["device_id"], safe=""))
                     except urllib.error.HTTPError as exc:
                         if exc.code != 404:
                             raise
-                conn.execute("UPDATE tokens SET revoked_at = ? WHERE token = ?", (now(), r["token"]))
                 print(f"revoked {r['email']} {r['device_id'] or '(never used)'}")
+
+        elif cmd == "restore":
+            # For the honest mistake the guard catches: a folder switched to
+            # Send & Receive. Fix that on the machine first, or the guard will
+            # cut it off again at its next change. A re-run of the installer
+            # cannot do this part: it finds the server already known and never
+            # calls /register, so the device is re-added here.
+            if not rest:
+                sys.exit("restore needs a device ID")
+            dev = rest[0].upper()
+            rows = conn.execute("SELECT * FROM tokens WHERE device_id = ? "
+                                "AND revoked_at IS NOT NULL", (dev,)).fetchall()
+            if not rows:
+                sys.exit("no revoked device with that ID")
+            conn.execute("DELETE FROM tokens WHERE device_id = ? AND token LIKE 'guard:%'", (dev,))
+            conn.execute("UPDATE tokens SET revoked_at = NULL WHERE device_id = ?", (dev,))
             conn.commit()
+            name = next((r["device_name"] for r in rows if r["device_name"]), "") \
+                or "langtechdepot-client"
+            if dev not in {d["deviceID"] for d in st("GET", "/rest/config/devices") or []}:
+                st("POST", "/rest/config/devices",
+                   {"deviceID": dev, "name": name, "addresses": ["dynamic"]})
+            share_catalog_with({dev})
+            print(f"restored {dev} ({name})")
         else:
             sys.exit(f"unknown admin command: {cmd}")
     finally:
@@ -687,6 +1016,7 @@ def main() -> None:
         return
     db()  # create schema before first request
     threading.Thread(target=reconcile_loop, daemon=True).start()
+    threading.Thread(target=guard_loop, daemon=True).start()
     srv = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), Handler)
     print(f"[boot] listening on {LISTEN_HOST}:{LISTEN_PORT}  "
           f"auto-approve={AUTO_APPROVE}  smtp={'yes' if SMTP_HOST else 'no'}", flush=True)

@@ -16,8 +16,10 @@ California repository server and is not in here.
 
 ## How a device joins
 
-1. User fills the form at `PUBLIC_URL` → `register.py` mints a single-use token, shows it
-   on the page, and emails it when SMTP is configured (it is not yet — see Traps).
+1. User fills the form at `PUBLIC_URL` → `register.py` mints a single-use token. With
+   `AUTO_APPROVE=false` (the default, and the launch setting) it waits: `ADMIN_EMAIL` gets
+   the `ltd-sync-admin approve <token>` command, and approving emails the token. With
+   `true` the token is shown on the page and emailed.
 2. The installer POSTs `{token, deviceID, deviceName}` to `/register`. An installer re-run
    on a machine the server already knows skips the token.
 3. The service adds the device to Syncthing, shares every catalog folder with it, burns the token.
@@ -30,7 +32,19 @@ California repository server and is not in here.
 
 Server folders are **Send Only**; clients are receive-only. Every catalog folder is offered
 to every registered device. Syncthing's introducer mode lets clients learn each other, so
-office LANs sync peer-to-peer.
+office LANs sync peer-to-peer — that is the bandwidth saving, and it stays.
+
+**Introducer mode has a cost, and the guard pays it.** A receive-only folder accepts newer
+files from *any* device it shares with, not only the server, and the introducer connects
+every registered device to every field machine. So one registrant whose own copy is Send &
+Receive — malicious, or a user who clicked the wrong option — could push a changed
+`setup.exe` to the whole cluster. Syncthing has no "accept only from the server" setting.
+`guard_loop` in `register.py` closes the gap from the server: catalog folders here are Send
+Only, so the server can only *need* a version another device made, and `modifiedBy` names
+it. The guard cuts that device off (the introducer then drops it from every client),
+Overrides, and mails `ADMIN_EMAIL`. It reacts within seconds, not instantly, which is why
+`AUTO_APPROVE` stays false: a person checks who gets in. Don't turn either off while
+clients use introducer mode.
 
 **The catalog file is an interface.** `LangTechDepotFiles.txt` is generated on the server
 by a script outside this repo (LTUse's side), and both installers parse it. The folder
@@ -142,6 +156,7 @@ python3 server/test_register.py     # full test suite; no network, no real Synct
 ltd-sync-admin list [--pending]     # on the server: who registered what
 ltd-sync-admin approve <token>      # issue + email
 ltd-sync-admin revoke <email|device-id|token>
+ltd-sync-admin restore <device-id>  # undo a guard cut-off after an honest mistake
 ```
 
 `revoke` removes the device from Syncthing — that is what actually ends access; the DB flag
@@ -177,7 +192,11 @@ only stops the reconciler from re-adding it.
   location is how the Linux installer used to die. Pinning also gives the depot its own
   Syncthing instance instead of borrowing the user's personal one, which matters because
   registration PATCHes `defaults/folder` to receive-only and would otherwise rewrite
-  *their* defaults. Don't hardcode the GUI port either: first start probes for a free one.
+  *their* defaults. Don't hardcode the GUI port either — read `gui/address` back from
+  our `config.xml`. Linux takes whatever first start probed; Windows asks for 8384 so
+  the usual address holds, and moves to a free port when something else has it.
+  Likewise on Windows, "is Syncthing running?" means *our* process (matched on its
+  `--home`), never any `syncthing.exe`: a user may run their own.
 - **Never load `config.xml` with `[xml](Get-Content ...)`.** Use
   `$x = New-Object System.Xml.XmlDocument; $x.PreserveWhitespace = $true; $x.Load($path)`.
   Without `PreserveWhitespace`, `$x.Save()` re-indents the whole file and splits every
@@ -203,7 +222,7 @@ only stops the reconciler from re-adding it.
   before 1.1 kept the folders directly in the home folder; the installer leaves those
   as they are (no `Assets` item). Not Downloads (gets cleaned out, and a startup program there looks like
   malware), not Documents/Desktop (often OneDrive-synced, so gigabytes would upload).
-- **People are told `localhost:8384`; the script uses `127.0.0.1:8384`.** Syncthing
+- **People are told `localhost:<port>`; the script uses `127.0.0.1:<port>`.** Syncthing
   is bound to 127.0.0.1; "localhost" may resolve to `::1` first. Browsers fall back,
   `Invoke-RestMethod` callers shouldn't have to. `$GUI_PAGE` is for messages and
   shortcuts, `$GUI_URL` for API calls.
@@ -235,15 +254,15 @@ only stops the reconciler from re-adding it.
   `ltd-sync-admin` wrapper. Same underlying command.
 - **GitHub Pages needs one manual setting**: Settings → Pages → Source → *GitHub
   Actions*. Without it the workflow runs green and publishes nothing.
-- The token is **shown on the confirmation page**, and is meant to be emailed as well. A
-  field user on a slow link who has to go and find a mail client mid-install is one who
-  does not finish, so the page is the delivery and the mail the backup. **But no mail goes
-  out today**: `SMTP_HOST` is empty on the server, so the page is the *only* copy, and
-  `ltd-sync-admin approve` can notify nobody. The sender is to be
-  `depot@langtech.cloud` (already in `register.env.example`), a Zoho mailbox that does not
-  exist yet — see #15 and the comments on #24. `docs/help.html` still says "reply to the
-  email your token arrived in"; fix that line, `MAIL_FROM` and the SMTP settings together
-  once the mailbox is live.
+- **With approval on, mail is the only delivery.** With `AUTO_APPROVE=true` the token is
+  shown on the page and mail is the backup (a field user who has to go and find a mail
+  client mid-install may not finish); with `false` it cannot be, so the site's step 1 is
+  worded for email, and `docs/help.html` has "My token has not arrived". Flip the setting
+  and that wording must change with it. Mail goes out
+  from `depot@langtech.cloud` (Zoho, `smtppro.zoho.com`), which is also the support
+  address `docs/help.html` gives and is read in Thunderbird. If SMTP fails, the page
+  says it is the only copy — keep that fallback. `register.env.example` ships with
+  `SMTP_PASS` blank; copied as-is, every sign-up waits on a failing login.
 - **The Linux picker needs `yad`.** The installer checks for it first and exits 1
   before registering. Keep that check above the token prompt: when the dialog fails
   later, the script reports "Operation cancelled." and exits 0, with a token spent and

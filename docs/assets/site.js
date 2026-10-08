@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', function () {
 /* Copy the text of the element named by data-copy. navigator.clipboard needs
    a secure context, which a file:// preview and plain http are not, so the
    textarea fallback stays: a field user on a locked-down machine must never
-   be told to retype a 40-character token by hand. */
+   be told to retype a 22-character token by hand. */
 function ltdCopy(btn) {
   var src = document.getElementById(btn.getAttribute('data-copy'));
   if (!src) { return; }

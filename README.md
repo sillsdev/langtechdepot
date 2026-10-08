@@ -144,12 +144,16 @@ bash client/install-langtechdepot.sh
 ```
 
 No admin rights on either platform. The installer sets Syncthing to start
-automatically, registers the machine, and opens the web GUI at
-<http://localhost:8384>. Files land under `~/LangTechDepot/` (or
-`%USERPROFILE%\LangTechDepot\`).
+automatically, registers the machine, and shows the folder list. Syncthing's own
+page is usually at <http://localhost:8384>; the installer prints the actual
+address, since the port moves if something else holds it. Files land under `~/LangTechDepot/` (or
+`%USERPROFILE%\LangTechDepot\Assets\`, or wherever the user pointed it).
 
 On Linux,
-`langtechdepot-subscribe.sh` lists the catalog and subscribes by folder ID.
+`langtechdepot-subscribe.sh` lists the catalog and subscribes by folder ID
+(`langtechdepot-subscribe.sh <id>...`), taking a folder back off the ignore list
+if need be; `langtechdepot-subscribe.sh ignore <id>...` ignores one, like
+`modify-langtechdepot ignore` on Windows.
 
 ## Sneakernet
 
@@ -163,7 +167,8 @@ as its own device whenever the drive visits a connected machine.
 See [server/SETUP.md](server/SETUP.md) — Syncthing standup, the folder catalog,
 and the registration service ([server/register.py](server/register.py)) that
 serves the form, issues single-use tokens, admits devices, and keeps the
-catalog shared. Administration is `register.py admin list|approve|revoke`.
+catalog shared — and guards it: a change from any device but the server is undone and
+that device cut off. Administration is `register.py admin list|approve|revoke|restore`.
 
 [server/Caddyfile.example](server/Caddyfile.example) carries the recipe for the
 end state: the instructions site served from `depot.langtech.cloud` itself,
@@ -190,7 +195,11 @@ client/  setup-langtechdepot.ps1     field installer (Windows) - edit this
                                      uses modify-langtechdepot, i.e. the installer)
 server/  SETUP.md                    server standup guide
          register.py                 registration service + admin CLI
+         test_register.py            end-to-end test against a stub Syncthing
+         ltd-sync-admin              sudo wrapper for `register.py admin`
+         token_backup.sh             nightly sqlite .backup, 30-day retention
          langtechdepot-register.service   systemd unit
          register.env.example        configuration template
          Caddyfile.example           TLS front end, and the merge plan
+images/                              screenshots for intent.md
 ```

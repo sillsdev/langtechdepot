@@ -22,8 +22,10 @@ marker='#--LANGTECHDEPOT-PS1-PAYLOAD-BELOW--#'
 
 # CMD misreads a .bat with LF-only line endings, so both halves must be CRLF.
 # .gitattributes checks them out that way; this catches an editor undoing it.
+# BINMODE=3 stops Git Bash's gawk on Windows reading (and writing) in text
+# mode, which strips the very \r this looks for; other awks ignore it.
 for f in "$head" "$payload"; do
-    if ! LC_ALL=C awk '!/\r$/ { bad = 1; exit } END { exit bad }' "$f"; then
+    if ! LC_ALL=C awk -v BINMODE=3 '!/\r$/ { bad = 1; exit } END { exit bad }' "$f"; then
         echo "build-bat: $f has lines without CRLF endings" >&2
         exit 1
     fi
@@ -53,8 +55,10 @@ fi
 
 {
     cat "$head"
-    # Lines keep their CRLF: awk's record still ends in \r, and print adds \n.
-    awk -v v="$version" '{
+    # Lines keep their CRLF: awk's record still ends in \r, and print adds
+    # \n - given binary mode (BINMODE=3, as above). In text mode Git Bash's
+    # gawk drops the \r on reading, so the version line never matches.
+    awk -v BINMODE=3 -v v="$version" '{
         if ($0 == "$LTD_VERSION = \"dev\"\r") print "$LTD_VERSION = \"" v "\"\r"
         else print
     }' "$payload"
