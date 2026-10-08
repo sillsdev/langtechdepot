@@ -740,6 +740,23 @@ if ($locationChosen) {
     $ownerForm.Opacity = 0
     $ownerForm.TopMost = $true
     $ownerForm.Show()
+    # TopMost alone is not enough: Windows' foreground lock stops a process
+    # that has not had the user's last keypress from taking the front, so the
+    # dialog still opened behind the console. A synthetic Alt tap counts as
+    # input and lifts the lock, after which SetForegroundWindow works.
+    # Best effort - if any of it fails, the user can still Alt-Tab to it.
+    try {
+        if (-not ('LTD.Foreground' -as [type])) {
+            Add-Type -Namespace LTD -Name Foreground -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+'@
+        }
+        [LTD.Foreground]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)   # Alt down
+        [LTD.Foreground]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)   # Alt up
+        [LTD.Foreground]::SetForegroundWindow($ownerForm.Handle) | Out-Null
+    } catch { }
+    $ownerForm.Activate()
 
     $result = $folderDialog.ShowDialog($ownerForm)
     $ownerForm.Close()
@@ -1207,14 +1224,16 @@ function Show-FolderSelectionForm {
     })
     $form.TopMost = $true
 
-    $instructionText = "Check (+) the folders you want to sync. NOTE: All unchecked folders will be IGNORED (-)"
+    $noteText = "NOTE: All unchecked folders will be IGNORED (-)"
+    $instructionText = "Check (+) the folders you want to sync. $noteText`n" +
+                       "(The list of everything available, $CatalogID, is always kept.)"
     $noteIndex = $instructionText.IndexOf("NOTE:")
 
     $label = New-Object System.Windows.Forms.RichTextBox
     $label.Text = $instructionText
     $label.Font = [System.Drawing.Font]::new("Segoe UI", 9)
     $label.Dock = "Top"
-    $label.Height = 30
+    $label.Height = 46
     $label.Padding = [System.Windows.Forms.Padding]::new(10, 5, 0, 0)
     $label.ReadOnly = $true
     $label.TabStop = $false
@@ -1224,7 +1243,7 @@ function Show-FolderSelectionForm {
 
     # Colour and bold only the "NOTE: ..." clause; leave the lead-in sentence
     # in the default colour/weight.
-    $label.Select($noteIndex, $instructionText.Length - $noteIndex)
+    $label.Select($noteIndex, $noteText.Length)
     $label.SelectionColor = [System.Drawing.Color]::Red
     $label.SelectionFont = [System.Drawing.Font]::new("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
     $label.Select(0, 0)
