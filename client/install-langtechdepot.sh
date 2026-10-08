@@ -9,16 +9,16 @@
 #
 #   bash install-langtechdepot.sh
 #
-# No token yet? Register at the URL below: the token is shown on the page and
-# emailed to you as well.
+# No token yet? Fill in the form at REGISTER_URL/signup below; once the request
+# is approved the token is emailed to you.
 
 set -euo pipefail
 
 # Path definitions
 REGISTER_URL='https://depot.langtech.cloud'
-# Where a stuck user is sent. The registration form answers "I have no token";
+# Where a stuck user is sent. The form at /signup answers "I have no token";
 # it does not answer "it failed", and those are different people.
-HELP_URL='https://sillsdev.github.io/langtechdepot/help.html'
+HELP_URL='https://depot.langtech.cloud/help.html'
 
 # The folder picker is a yad window. Checked here, before anything is installed
 # or a token is spent: missing yad used to surface only at the picker, after
@@ -254,7 +254,7 @@ if [ -n "$EXISTING_SERVER_ID" ]; then
     echo " "
 else
     # Not yet registered with LangTechDepot -> Prompt for token
-    echo "No token yet? Register at $REGISTER_URL"
+    echo "No token yet? Register at $REGISTER_URL/signup?os=linux"
     echo
 
     RESPONSE=''

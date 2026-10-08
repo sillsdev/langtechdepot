@@ -25,7 +25,7 @@ var SIGNUP = '/signup';
    the command is correct with JavaScript switched off; the rewrite below then
    corrects it to wherever the page is actually being served from. Move the
    site and the command follows, with no edit. */
-var SITE_DEFAULT = 'https://sillsdev.github.io/langtechdepot/';
+var SITE_DEFAULT = 'https://depot.langtech.cloud/';
 
 function siteBase() {
   var href = location.href.split('#')[0].split('?')[0];

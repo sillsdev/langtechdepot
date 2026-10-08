@@ -10,7 +10,7 @@ it in and press Enter.
 If you have not got a token yet, or something goes wrong, the step-by-step
 instructions with pictures are here:
 
-    https://sillsdev.github.io/langtechdepot/
+    https://depot.langtech.cloud/
 
 Only if the installer says it could not get Syncthing: unzip this download
 first (right-click the zip -> Extract All -> Extract), put syncthing.exe from
