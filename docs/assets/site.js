@@ -1,10 +1,8 @@
 /* LangTechDepot site behaviour. Two jobs, both small.
 
-   1. One place to change when the two sites merge. Every link that leaves
-      this site for the depot server is written as <a data-signup="query">,
-      and is built from the two constants below. When this site is eventually
-      served from depot.langtech.cloud itself, change those two and every link
-      follows. Nothing else needs editing.
+   1. One place for the address of the sign-up form. Every link to it is
+      written as <a data-signup="query"> and built from the two constants
+      below, so moving the form means changing those two and nothing else.
 
    2. The copy buttons. server/register.py carries its own copy of this
       handler for the token page - it is one file with no assets and it must
@@ -15,11 +13,11 @@ var DEPOT = 'https://depot.langtech.cloud';
 /* Path of the sign-up form on that server. Nobody can be sent straight to a
    token: they fill this form in and the token comes back from it.
 
-   It is "/" today. When the instructions site takes over "/" on that host,
-   change this to "/signup" - register.py already answers there - and set
-   DEPOT to '' at the same time. Those two lines are the whole client side of
-   the merge. */
-var SIGNUP = '/';
+   "/" on that host is this site (Caddy mirrors GitHub Pages there), so the
+   form lives at "/signup". DEPOT stays absolute: the same link is right
+   whether this page was reached at depot.langtech.cloud or at the github.io
+   mirror. */
+var SIGNUP = '/signup';
 
 /* Where this site is published. Every download link in the pages is relative,
    so nothing here needs it - except the Linux command, which has to name an
