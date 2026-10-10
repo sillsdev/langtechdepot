@@ -8,7 +8,7 @@
 
 ## 1. Why this step exists
 
-Since PR #29 (launch-readiness fixes), a person has to approve each new receiver of the Depot installers before they get access. It closes the security hole where someone could switch a read-only folder to send/receive and push content to every subscriber. Our earlier sync methods never had this step, so new users will notice it.
+Since PR #29 (launch-readiness fixes), a person has to approve each new receiver of the Depot installers before they get access. It closes the security hole where someone could switch a read-only folder to send/receive and push content to every subscriber. Our earlier sync methods never had this step, so only new users will notice it.
 
 What this means for users:
 
@@ -21,7 +21,7 @@ What this means for users:
 2. The registration service (`register.py`, running as `langtechdepot-register`) emails an **approval request** to the admin mailbox **depot@langtech.cloud**.
 3. That email contains a ready-made command, for example:
    ```
-   ltd-sync-admin approve wwBYgEAnCn89ZFfQaEpqbw
+   ltd-sync-admin approve wwBYgEAxxxx9ZFfQaEpqbw
    ```
    Each sign-up gets its own token.
 4. An admin runs the command on the Depot server.
@@ -35,7 +35,7 @@ Without a change, approval requests reach only the depot@langtech.cloud mailbox,
 |---|---|---|
 | **A. Forward to Doug** (recommended) | Jim has already added a forward from depot@langtech.cloud to Doug's address. Zoho has sent Doug a **verification code**. Doug sends the code to Jim, or enters it himself, in the Zoho web UI. | Once confirmed it needs no further action and can stay on for good. |
 | **B. Change the admin address on the server** | Edit `register.env` so approval mail goes to Doug, then restart the service (see §5). | Temporary. **Change it back afterwards**, or Jim stops getting requests. |
-| **C. Log into the mailbox directly** | Web: mail.zoho.com as depot@langtech.cloud. | Share the password through a password manager or another private channel, **not Slack**. ⚠️ The password was posted in the Slack DM on 9 Oct, so change it and reshare it privately. |
+| **C. Log into the mailbox directly** | Web: mail.zoho.com as depot@langtech.cloud. | Share the password through a password manager or another private channel, **not Slack**. ⚠️ The password was posted in the Slack DM on 9 Oct, so I have changed it and will reshare it privately some time. |
 
 Jim's own client setup, for reference: Thunderbird, IMAP `imappro.zoho.com`, port 993, SSL/TLS, normal password.
 
@@ -43,7 +43,8 @@ Jim's own client setup, for reference: Thunderbird, IMAP `imappro.zoho.com`, por
 
 1. Open the approval request email in depot@langtech.cloud (or in your forwarded copy).
 2. **Decide whether to approve.** ⟦TBC: approval policy, e.g. SIL/partner addresses approved on sight, anything else checked with Jim or Doug first.⟧ Recent approvals: doug_higby@sil.org, eric_hays@sil.org.
-3. SSH to the Depot server: ⟦TBC: host and login, e.g. `ssh user@host`⟧
+3. If approving, copy the command from the email to the clipboard and
+3. SSH to the Depot server: ⟦host and login, e.g. `ssh doug@depot.langtech.cloud`⟧
 4. Paste the command from the email exactly as written:
    ```
    ltd-sync-admin approve <token-from-email>
