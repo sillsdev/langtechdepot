@@ -60,7 +60,7 @@ Location: ⟦TBC: full path, e.g. `/opt/langtechdepot/register.env`⟧
   ```
   sudo chgrp syncthing register.env && sudo chmod 640 register.env
   ```
-- **`GUARD_MODE` must be set.** It is currently `GUARD_MODE=report`. If the key is missing, the code **defaults to `enforce`** and the guard starts cutting devices off immediately. Don't delete this line when editing. Switching to `enforce` is Jim's job after the report-mode trial day, so leave it alone.
+- **`GUARD_MODE=enforce`** (since 10 Oct, after a report-only trial). The guard cuts off any device that changes a catalog folder and emails the admin address. If a device was cut off by an honest mistake, `ltd-sync-admin restore <device-id>` undoes it. Leave this setting alone; changing it is Jim's call.
 - **Admin email variable** (for option B): ⟦TBC: variable name⟧
 - **After any edit**, restart and check:
   ```

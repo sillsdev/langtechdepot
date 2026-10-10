@@ -44,7 +44,8 @@ Only, so the server can only *need* a version another device made, and `modified
 it. The guard cuts that device off (the introducer then drops it from every client),
 Overrides, and mails `ADMIN_EMAIL`. It reacts within seconds, not instantly, which is why
 `AUTO_APPROVE` stays false: a person checks who gets in. Don't turn either off while
-clients use introducer mode.
+clients use introducer mode. `GUARD_MODE=report` in `register.env` makes the guard only mail
+what it would have done; a missing key means `enforce`, so never delete the line by accident.
 
 **The catalog file is an interface.** `LangTechDepotFiles.txt` is generated on the server
 by a script outside this repo (LTUse's side), and both installers parse it. The folder
@@ -81,6 +82,7 @@ server/  register.py                    registration service + admin CLI (stdlib
          ltd-sync-admin                 sudo wrapper for `register.py admin`
          token_backup.sh                nightly sqlite .backup, 30-day retention
          SETUP.md                       server standup guide (the real deployment doc)
+         LTD_signup_approval_runbook.md approving sign-ups, for whoever covers while Jim is offline
          langtechdepot-register.service · register.env.example · Caddyfile.example
 images/                                 screenshots for intent.md (never served to field users)
 .github/workflows/pages.yml            builds the .bat and the zip, publishes docs/ to Pages
