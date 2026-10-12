@@ -63,6 +63,7 @@ Location: `/etc/langtechdepot/register.env`. Editing it needs full `sudo`; being
 - **`GUARD_MODE=enforce`** (since 10 Oct, after a report-only trial). The guard cuts off any device that changes a catalog folder and emails the admin address. If a device was cut off by an honest mistake, `ltd-sync-admin restore <device-id>` undoes it. Leave this setting alone; changing it is Jim's call.
 - **Admin email variable** (for option B): `ADMIN_EMAIL`
 - **After any edit**, restart and check:
+- 
   ```
   sudo systemctl restart langtechdepot-register
   sudo systemctl status langtechdepot-register
@@ -74,7 +75,7 @@ Location: `/etc/langtechdepot/register.env`. Editing it needs full `sudo`; being
 |---|---|
 | User says "no email arrived" | Usually not approved yet. Look for their approval request and run §4. Then ask them to check spam. |
 | Email still missing after approval | langtech.cloud has an SPF record but **no DKIM record**, so some mail servers may junk or drop the message. Ask the user to check spam or quarantine. A DKIM record is the long-term fix ⟦TBC: owner⟧. |
-| Someone already registered signs up again | Unconfirmed whether a repeat sign-up raises a new request (Doug asked on 8 Oct). ⟦TBC⟧ |
+| Someone already registered signs up again | Confirmed: a repeat sign-up raises a new request. |
 | Service won't start after editing register.env | Check permissions in §5 and run `journalctl -u langtechdepot-register -n 50`. |
 | No approval requests arriving at all | Check the service is running (`systemctl status`) and that the admin address in register.env is correct. |
 
