@@ -201,7 +201,7 @@ client/  setup-langtechdepot.ps1     field installer (Windows) - edit this
 server/  SETUP.md                    server standup guide
          register.py                 registration service + admin CLI
          test_register.py            end-to-end test against a stub Syncthing
-         ltd-sync-admin              sudo wrapper for `register.py admin`
+         ltd-sync-admin              runs `register.py admin` (for group ltadmin; no sudo)
          token_backup.sh             nightly sqlite .backup, 30-day retention
          langtechdepot-register.service   systemd unit
          register.env.example        configuration template

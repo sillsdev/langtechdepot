@@ -11,7 +11,14 @@ RestartSec=5
 
 # Runs as the Syncthing owner so it can read config.xml for the API key.
 User=syncthing
+# Group ltadmin: members run `ltd-sync-admin` as themselves, so they share this
+# service's files through the group. systemd makes the state directory
+# syncthing:ltadmin with the mode below at every start (and regroups what is in
+# it), so the group's access can't drift away. register.env is root:ltadmin 640.
+Group=ltadmin
+SupplementaryGroups=syncthing
 StateDirectory=langtechdepot
+StateDirectoryMode=0770
 
 # Only ever talks to localhost Syncthing and outbound SMTP; nothing here
 # needs to write outside its state directory.

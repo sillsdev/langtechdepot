@@ -43,25 +43,25 @@ Jim's own client setup, for reference: Thunderbird, IMAP `imappro.zoho.com`, por
 
 1. Open the approval request email in depot@langtech.cloud (or in your forwarded copy).
 2. **Decide whether to approve.** ⟦TBC: approval policy, e.g. SIL/partner addresses approved on sight, anything else checked with Jim or Doug first.⟧ Recent approvals: doug_higby@sil.org, eric_hays@sil.org.
-3. If approving, copy the command from the email to the clipboard and
-3. SSH to the Depot server: ⟦host and login, e.g. `ssh doug@depot.langtech.cloud`⟧
-4. Paste the command from the email exactly as written:
+3. If approving, copy the command from the email to the clipboard.
+4. SSH to the Depot server: ⟦host and login, e.g. `ssh doug@depot.langtech.cloud`⟧
+5. Paste the command from the email exactly as written, **without** `sudo`:
    ```
    ltd-sync-admin approve <token-from-email>
    ```
-   ⟦TBC: whether it needs `sudo`. It is installed root-owned and mode 755 in `/usr/local/bin`.⟧
-5. The command makes the server email the user their code. Optionally, let the user know it's on its way and to check their spam folder.
+   It works for anyone in the group `ltadmin`. If it says "can't read /etc/langtechdepot/register.env", your account isn't in `ltadmin` yet (or you haven't logged in again since being added): ask Jim. `ltd-sync-admin list --pending` shows who is waiting.
+6. The command makes the server email the user their code. Optionally, let the user know it's on its way and to check their spam folder.
 
 ## 5. register.env: handle with care
 
-Location: ⟦TBC: full path, e.g. `/opt/langtechdepot/register.env`⟧
+Location: `/etc/langtechdepot/register.env`. Editing it needs full `sudo`; being in `ltadmin` is not enough.
 
-- **Ownership and permissions:** the group must be `syncthing` with mode `640`. `register.py` runs as `syncthing` and can't start if it can't read the file. If an editor resets the permissions, restore them:
+- **Ownership and permissions:** the group must be `ltadmin` with mode `640`. The service and `ltd-sync-admin` both read it through that group, and neither works if they can't. It holds the Syncthing API key and the mail password, so don't copy it anywhere. If an editor resets the permissions, restore them:
   ```
-  sudo chgrp syncthing register.env && sudo chmod 640 register.env
+  sudo chgrp ltadmin register.env && sudo chmod 640 register.env
   ```
 - **`GUARD_MODE=enforce`** (since 10 Oct, after a report-only trial). The guard cuts off any device that changes a catalog folder and emails the admin address. If a device was cut off by an honest mistake, `ltd-sync-admin restore <device-id>` undoes it. Leave this setting alone; changing it is Jim's call.
-- **Admin email variable** (for option B): ⟦TBC: variable name⟧
+- **Admin email variable** (for option B): `ADMIN_EMAIL`
 - **After any edit**, restart and check:
   ```
   sudo systemctl restart langtechdepot-register

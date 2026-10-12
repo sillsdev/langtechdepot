@@ -103,10 +103,13 @@ umask 027  # Ensure group read-only access and completely block others
 sudo apt update && sudo apt install -y python3-dotenv sqlite3
 sudo mkdir -p /opt/langtechdepot /etc/langtechdepot
 sudo cp register.py /opt/langtechdepot/
+getent group ltadmin || sudo groupadd ltadmin   # the service runs with this group
 sudo cp register.env.example /etc/langtechdepot/register.env
-sudo chgrp syncthing !$	  # so register.py can read env
+sudo chgrp ltadmin !$	  # the service and ltd-sync-admin users read it
 sudo chmod 640 !$
 sudo $EDITOR !$    # API key (Syncthing GUI: Actions > Settings > API Key), SERVER_ADDRESS, SMTP
+# Put the key itself in SYNCTHING_API_KEY, not SYNCTHING_CONFIG: admins run
+# ltd-sync-admin as themselves and can't read Syncthing's config.xml.
 
 sudo cp langtechdepot-register.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -126,9 +129,23 @@ then enable the script:
 ``` bash
 $EDITOR ltd-sync-admin	# check folder of register.py
 # Install a root-owned copy (not a symlink into this checkout: whoever can edit
-# the checkout would then choose what runs under your sudo). Re-run after edits.
+# the checkout would then choose what every admin runs). Re-run after edits.
 sudo install -o root -g root -m 755 ltd-sync-admin /usr/local/bin/
 ```
+
+**Who may administer sign-ups: the group `ltadmin`.** `ltd-sync-admin` needs
+no sudo. It runs as whoever types it, and the group gives them what
+`register.py admin` needs: reading `register.env` (root:ltadmin 640) and
+writing the token database (the unit's `Group=ltadmin` makes systemd keep
+`/var/lib/langtechdepot` as syncthing:ltadmin 0770, and `register.py` keeps
+`register.db` at 660). Membership is trust: members can read the Syncthing API
+key and the mail password in `register.env`. Only someone with full sudo can
+change who is a member.
+``` bash
+sudo usermod -aG ltadmin <user>	# give someone admin rights (next login)
+sudo gpasswd -d <user> ltadmin	# take them away
+```
+A member tests it with `ltd-sync-admin list --pending`.
 
 So that the clients' tokens can be backed up,
 make sure that the backup script will put them in the right place.
@@ -178,6 +195,7 @@ sudo $EDITOR /etc/langtechdepot/register.env
 
 sudo cp register.py /opt/langtechdepot/
 sudo cp langtechdepot-register.service /etc/systemd/system/
+sudo chgrp ltadmin /etc/langtechdepot/register.env   # was syncthing before ltadmin admins
 sudo systemctl daemon-reload
 sudo install -o root -g root -m 755 ltd-sync-admin token_backup.sh /usr/local/bin/
 sudo systemctl restart langtechdepot-register

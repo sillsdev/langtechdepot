@@ -1,10 +1,19 @@
 #!/bin/sh
 #
-# ltd-sync-admin -- Runs `register.py admin` (with sudo) to control our syncing.
+# ltd-sync-admin -- Runs `register.py admin` to approve, list, revoke and
+# restore LangTechDepot sign-ups.
 #
-# Run it as yourself; it calls sudo, so you need sudo rights on this box.
+# Who may use it: members of the group ltadmin. No sudo: it runs as you, and
+# the group lets you read register.env and write the token database.
+# Add someone:  sudo usermod -aG ltadmin <user>   (works from their next login)
 #
 # The "$@" will add any arguments to the register.py command's args.
 #
 DIR=/opt/langtechdepot
-sudo python3 $DIR/register.py admin "$@"
+ENV=/etc/langtechdepot/register.env
+if [ ! -r "$ENV" ]; then
+    echo "ltd-sync-admin: can't read $ENV." >&2
+    echo "You need to be in the group ltadmin (and to have logged in again since being added)." >&2
+    exit 1
+fi
+exec /usr/bin/python3 "$DIR/register.py" admin "$@"

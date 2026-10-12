@@ -79,7 +79,7 @@ client/  setup-langtechdepot.ps1        Windows installer - the one copy; edit t
          START-HERE.txt                 rides along inside the Windows zip
 server/  register.py                    registration service + admin CLI (stdlib + dotenv)
          test_register.py               end-to-end test against a stub Syncthing
-         ltd-sync-admin                 sudo wrapper for `register.py admin`
+         ltd-sync-admin                 runs `register.py admin` as the caller (group ltadmin)
          token_backup.sh                nightly sqlite .backup, 30-day retention
          SETUP.md                       server standup guide (the real deployment doc)
          LTD_signup_approval_runbook.md approving sign-ups, for whoever covers while Jim is offline
@@ -168,6 +168,12 @@ ltd-sync-admin approve <token>      # issue + email
 ltd-sync-admin revoke <email|device-id|token>
 ltd-sync-admin restore <device-id>  # undo a guard cut-off after an honest mistake
 ```
+
+These need no sudo: **membership of the group `ltadmin`** is what allows them, and it is
+a matter of trust. `register.env` is root:ltadmin 640, the unit's `Group=ltadmin` keeps
+`/var/lib/langtechdepot` syncthing:ltadmin 0770, and `register.py` keeps `register.db`
+at 660. So the API key goes in `SYNCTHING_API_KEY`: admins can't read Syncthing's
+`config.xml`. No sudoers rule, by Jim's choice.
 
 `revoke` removes the device from Syncthing — that is what actually ends access; the DB flag
 only stops the reconciler from re-adding it.

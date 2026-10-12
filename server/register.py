@@ -139,11 +139,12 @@ def db() -> sqlite3.Connection:
         revoked_at  TEXT
     )""")
     conn.commit()
-    # Set permissions on DB_PATH to 640, so not readable by Others. Only the
-    # owner may chmod: if root created the file (`sudo ltd-sync-admin` before
-    # the service's first start) the service must still come up.
+    # Set permissions on DB_PATH to 660: the group (ltadmin, from the unit's
+    # Group=) may write, since `ltd-sync-admin` runs as the admin themselves;
+    # Others get nothing. Only the owner may chmod: when an admin's run opens a
+    # file the service created, this fails and that is fine.
     try:
-        os.chmod(DB_PATH, 0o640)
+        os.chmod(DB_PATH, 0o660)
     except OSError:
         pass
     return conn
