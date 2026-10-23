@@ -869,9 +869,20 @@ def guard_folder(fid: str) -> list[str]:
                   f"Device(s) cut off: {who}\nItems: {files}\n\n"
                   "The server's copy has been made the newest again (Override), so field\n"
                   "machines will pull it back. `ltd-sync-admin list` shows whose device it\n"
-                  "was. If it was an honest mistake - someone switched the folder to\n"
-                  "Send & Receive - have them set it back to Receive Only, then run\n"
-                  "`ltd-sync-admin restore <device-id>`.\n")
+                  "was.\n\n"
+                  "If it was an honest mistake - someone switched the folder to Send &\n"
+                  "Receive, or went back to a backup or VM snapshot from when it was -\n"
+                  "setting it back to Receive Only is NOT enough. The device still holds\n"
+                  "its change and offers it again as soon as it is restored, so it gets\n"
+                  "cut off again. Instead:\n\n"
+                  f"  1. On that device, in Syncthing: folder {fid} > Edit > Remove.\n"
+                  "     (This forgets the folder; its files stay on disk.)\n"
+                  f"  2. Delete its {fid} folder from Assets.\n"
+                  "  3. Here: `ltd-sync-admin restore <device-id>`\n"
+                  f"  4. On that device: `modify-langtechdepot add {fid}`\n"
+                  "     It downloads a fresh copy, Receive Only, with no history.\n\n"
+                  "If another mail like this arrives after the restore, check its Items\n"
+                  "line: a different folder needs the same treatment.\n")
     return sorted(culprits)
 
 
@@ -983,9 +994,11 @@ def admin(argv: list[str]) -> None:
 
         elif cmd == "restore":
             # For the honest mistake the guard catches: a folder switched to
-            # Send & Receive. Fix that on the machine first, or the guard will
-            # cut it off again at its next change. A re-run of the installer
-            # cannot do this part: it finds the server already known and never
+            # Send & Receive. Fix that on the machine first, by removing the
+            # folder there: set back to Receive Only, it still holds the change
+            # it already announced, and the guard cuts it off again as soon as
+            # it reconnects. The guard's mail gives the steps. A re-run of the
+            # installer cannot do this part: it finds the server already known and never
             # calls /register, so the device is re-added here.
             if not rest:
                 sys.exit("restore needs a device ID")

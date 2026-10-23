@@ -295,8 +295,14 @@ cuts that device off — which also removes it from every field machine — make
 the server's copy the newest again (Override), and mails `ADMIN_EMAIL`. Watch
 for it with `journalctl -u langtechdepot-register | grep guard`.
 
-If the device was an honest user who switched a folder to Send & Receive, have
-them set it back to Receive Only, then `ltd-sync-admin restore <device-id>`.
+If the device was an honest user who switched a folder to Send & Receive (or
+went back to a backup or VM snapshot from when it was), setting it back to
+Receive Only is not enough: the device keeps the change it already announced,
+offers it again as soon as it is restored, and is cut off again. Instead, on
+that device remove the folder in Syncthing (Edit > Remove; the files stay on
+disk) and delete it from Assets; then `ltd-sync-admin restore <device-id>`
+here; then `modify-langtechdepot add <folder>` on the device, which fetches a
+fresh Receive Only copy. The guard's mail spells out these steps.
 
 **Deploy it in report mode first.** `register.env.example` ships
 `GUARD_MODE=report`: for a day the guard only logs and mails what it *would*
