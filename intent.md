@@ -115,7 +115,8 @@ of every file with its size and date, searchable with Ctrl-F, as the old system 
 It is regenerated on the server, not by anything in this repo.
 
 **Gap.** The manifest is itself about half a megabyte, which on the worst links is not
-free. Nothing yet offers a smaller way in.
+free. Nothing yet offers a smaller way in.  
+*Would a zipped version of the manifest help? A user on a really slow connection could download it, unzip it, search it and then go back to the web page (/files), navigate to the appropriate folder and download the desired installer. The server script that keeps the manifest up-to-date could also easily provide a zipped copy. JimH44*
 
 ### G5 — A centre mirrors once; everyone else pulls over the LAN
 
@@ -129,7 +130,7 @@ office LAN, only the first machine to want a file pulls it across the ocean.
 That has a price: a receive-only folder accepts newer files from any device it shares
 with, so every registered device could push a changed file to every field machine.
 Two things pay it. The server guards the catalog — a change from any device but itself is
-undone within seconds and that device cut off — and since October 2026 each registration
+undone within seconds and that device is cut off — and since October 2026 each registration
 is checked by a person before its token is sent. The second is a step back from "an open
 website, not an invitation list": anyone may still ask, but someone now says yes.
 
