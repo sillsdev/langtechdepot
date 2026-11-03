@@ -79,11 +79,7 @@ so the user sees what each folder holds and how big it is before choosing, and c
 
 If I work in a French-speaking country, my coworkers will want Windows programs with the French interface, and we'll want to use the training videos in French. We won't need the equivalents for Russian or Indonesian.
 
-The descriptions also reach only the picker: a folder accepted straight from Syncthing's
-own page shows whatever label the server gives it.
-
-*Actually, the Syncthing GUI doesn't show ignored folders, and if you use the GUI to unignore a folder, it will suggest the label (i.e. the terse description), not the folder id. Using the picker's `Also display ignored folders` button is the best way to go. JimH44* 
-
+The descriptions also reach only the picker: a folder accepted straight from Syncthing's own page shows whatever label the server gives it, so using the picker's `Also display ignored folders` button is the best way to go.
 
 ### G3 — It lands where you want it, including a thumb drive
 
@@ -114,9 +110,8 @@ The manifest is back: `LangTechDepotFiles.txt` sits at the root of `/files`, a f
 of every file with its size and date, searchable with Ctrl-F, as the old system had it.
 It is regenerated on the server, not by anything in this repo.
 
-**Gap.** The manifest is itself about half a megabyte, which on the worst links is not
-free. Nothing yet offers a smaller way in.  
-*Would a zipped version of the manifest help? A user on a really slow connection could download it, unzip it, search it and then go back to the web page (/files), navigate to the appropriate folder and download the desired installer. The server script that keeps the manifest up-to-date could also easily provide a zipped copy. JimH44*
+**Gap.** The manifest is itself about half a megabyte, which on the worst links is not free. So now we offer a smaller way in.  
+A zipped version of the manifest is also provided A user on a really slow connection could download it, unzip it, search it and then go back to the web page (/files), navigate to the appropriate folder and download the desired installer. The server script that keeps the manifest up-to-date also makes a zipped copy.
 
 ### G5 — A centre mirrors once; everyone else pulls over the LAN
 
