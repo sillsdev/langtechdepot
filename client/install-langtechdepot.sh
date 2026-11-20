@@ -727,9 +727,17 @@ def read_selections(path):
     rows = []
     with open(path, encoding='utf-8') as f:
         for line in f:
-            # Cells went to yad escaped for Pango markup (see 'rows'), so undo
-            # that here; a '|' inside a description is not a column break.
-            parts = [html.unescape(p) for p in line.rstrip('\n').split('|')]
+            # yad ends every row with the separator too ('...|Description|'),
+            # so drop that one first: left on, the join below kept it, and
+            # every folder subscribed here got a label ending in '|'. Windows
+            # cannot make a folder with that in its name, so a client that
+            # accepted the folder from this one failed. Then, as cells went
+            # to yad escaped for Pango markup (see 'rows'), undo that; a '|'
+            # inside a description is not a column break.
+            raw = line.rstrip('\n')
+            if raw.endswith('|'):
+                raw = raw[:-1]
+            parts = [html.unescape(p) for p in raw.split('|')]
             if len(parts) >= 5 and parts[3]:
                 rows.append({'tick': parts[0].upper() == 'TRUE', 'now': parts[1], 'id': parts[3], 'desc': '|'.join(parts[4:])})
     return rows
@@ -762,6 +770,24 @@ if cmd == 'rows':
     # so that a real error still reaches the terminal.
     with open(hidden_path, 'w', encoding='utf-8') as f:
         f.write(str(hidden) + '\n')
+
+elif cmd == 'fixlabels':
+    # Repair for installs up to 1.2.1 (see read_selections): a label that is
+    # the catalog description plus a stray '|' gets the description back,
+    # both on subscribed folders and in the server's ignoredFolders. Labels
+    # the user changed themselves don't match, so they are left alone.
+    descs = {e['id']: e['desc'] for e in catalog()}
+    for f in api('GET', '/rest/config/folders') or []:
+        fid, lab = f.get('id'), f.get('label') or ''
+        if fid in descs and lab == descs[fid] + '|':
+            api('PATCH', '/rest/config/folders/' + fid, {'label': descs[fid]})
+            print(f'Repaired the label of: {fid}')
+    cur, changed = ignored_list(), False
+    for i in cur:
+        if i['id'] in descs and (i.get('label') or '') == descs[i['id']] + '|':
+            i['label'] = descs[i['id']]; changed = True
+    if changed:
+        api('PATCH', '/rest/config/devices/' + SERVER, {'ignoredFolders': cur})
 
 elif cmd == 'state':
     sel_path, mode, state_path = args[0], args[1], args[2]
@@ -837,6 +863,9 @@ SHOW_IGNORED=0
 picker_failed() {
     after_registration_failed "Could not build the list of folders (the error is shown above)."
 }
+
+# Not fatal: the picker below works whether or not the old labels are fixed.
+picker fixlabels || echo "Note: could not repair folder labels (see above); the folders still sync."
 
 while true; do
     picker rows "$PICK_STATE" "$SHOW_IGNORED" "$HIDDEN_COUNT_FILE" > "$YAD_TEMP_INPUT" || picker_failed
