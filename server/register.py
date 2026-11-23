@@ -848,7 +848,7 @@ def guard_folder(fid: str) -> list[str]:
               f"would cut off and override ({files})", flush=True)
         if ADMIN_EMAIL and culprits:
             send_mail(ADMIN_EMAIL, f"LangTechDepot guard (report only): {fid}",
-                      f"Folder {fid} has changes from: {who}\nItems: {files}\n\n"
+                      f"Folder {fid} has changes from: {who}\nItems changed:\n{files}\n\n"
                       "GUARD_MODE=report, so nothing was done. In enforce mode these\n"
                       "devices would be cut off and the folder overridden.\n")
         return []
@@ -859,17 +859,24 @@ def guard_folder(fid: str) -> list[str]:
     # the override with yet another newer version.
     st("POST", f"/rest/db/override?folder={_q(fid)}")
 
-    who = (", ".join(sorted(culprits)) + "; cut off" if culprits else
+    who = (", ".join(sorted(culprits)) if culprits else
            "this server's own older index" if ours else "a device no longer known")
-    print(f"[guard] {fid}: {len(names)} item(s) changed by {who}; overridden ({files})",
+    print(f"[guard] {fid}: {len(names)} item(s) changed by {who}"
+          f"{'; cut off' if culprits else ''}; overridden ({files})",
           flush=True)
     if ADMIN_EMAIL and culprits:
+        # The reader is usually on their own PC, not on this server, and may
+        # paste commands straight into a shell: so every command is on a line
+        # of its own, spelled out in full, with no backticks (which a shell
+        # would run as a command substitution).
+        restores = "".join(f"     ltd-sync-admin restore {d}\n" for d in sorted(culprits))
         send_mail(ADMIN_EMAIL, f"LangTechDepot: foreign change to {fid} undone",
                   f"Folder {fid} was changed by a device other than the depot server.\n\n"
-                  f"Device(s) cut off: {who}\nItems: {files}\n\n"
+                  f"Device(s) cut off: {who}\nItems undone:\n{files}\n\n"
                   "The server's copy has been made the newest again (Override), so field\n"
-                  "machines will pull it back. `ltd-sync-admin list` shows whose device it\n"
-                  "was.\n\n"
+                  "machines will pull it back. On the LangTechDepot server, this command\n"
+                  "shows whose device it was:\n"
+                  "     ltd-sync-admin list\n\n"
                   "If it was an honest mistake - someone switched the folder to Send &\n"
                   "Receive, or went back to a backup or VM snapshot from when it was -\n"
                   "setting it back to Receive Only is NOT enough. The device still holds\n"
@@ -878,11 +885,13 @@ def guard_folder(fid: str) -> list[str]:
                   f"  1. On that device, in Syncthing: folder {fid} > Edit > Remove.\n"
                   "     (This forgets the folder; its files stay on disk.)\n"
                   f"  2. Delete its {fid} folder from Assets.\n"
-                  "  3. Here: `ltd-sync-admin restore <device-id>`\n"
-                  f"  4. On that device: `modify-langtechdepot add {fid}`\n"
+                  "  3. On the LangTechDepot server:\n"
+                  f"{restores}"
+                  "  4. On that device:\n"
+                  f"     modify-langtechdepot add {fid}\n"
                   "     It downloads a fresh copy, Receive Only, with no history.\n\n"
                   "If another mail like this arrives after the restore, check its Items\n"
-                  "line: a different folder needs the same treatment.\n")
+                  "undone: a different folder needs the same treatment.\n")
     return sorted(culprits)
 
 
