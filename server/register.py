@@ -870,13 +870,16 @@ def guard_folder(fid: str) -> list[str]:
         # of its own, spelled out in full, with no backticks (which a shell
         # would run as a command substitution).
         restores = "".join(f"     ltd-sync-admin restore {d}\n" for d in sorted(culprits))
+        # Only the rows for the device(s) cut off: the full list is long, and
+        # 'grep revoked' would also show every device revoked in the past.
+        lookups = "".join(f"     ltd-sync-admin list | grep {d}\n" for d in sorted(culprits))
         send_mail(ADMIN_EMAIL, f"LangTechDepot: foreign change to {fid} undone",
                   f"Folder {fid} was changed by a device other than the depot server.\n\n"
                   f"Device(s) cut off: {who}\nItems undone:\n{files}\n\n"
                   "The server's copy has been made the newest again (Override), so field\n"
-                  "machines will pull it back. On the LangTechDepot server, this command\n"
-                  "shows whose device it was:\n"
-                  "     ltd-sync-admin list\n\n"
+                  "machines will pull it back. On the LangTechDepot server, this shows\n"
+                  "whose device it was:\n"
+                  f"{lookups}\n"
                   "If it was an honest mistake - someone switched the folder to Send &\n"
                   "Receive, or went back to a backup or VM snapshot from when it was -\n"
                   "setting it back to Receive Only is NOT enough. The device still holds\n"
