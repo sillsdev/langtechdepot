@@ -891,7 +891,9 @@ def guard_folder(fid: str) -> list[str]:
                   "  3. On the LangTechDepot server:\n"
                   f"{restores}"
                   "  4. On that device:\n"
-                  f"     modify-langtechdepot add {fid}\n"
+                  "     open the LangTechDepot folder,\n"
+                  "     run Change my Assets (Change-my-Assets on Linux),\n"
+                  f"     tick {fid} and click Apply.\n"
                   "     It downloads a fresh copy, Receive Only, with no history.\n\n"
                   "If another mail like this arrives after the restore, check its Items\n"
                   "undone: a different folder needs the same treatment.\n")
