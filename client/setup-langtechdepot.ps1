@@ -53,7 +53,7 @@ function Exit-Script {
 }
 
 # -----------------------------------------------------------------------------
-# Command-line mode: modify-langtechdepot add|ignore|list [folder IDs]
+# Command-line mode: modify-langtechdepot add|ignore|list|repair [folder IDs]
 # -----------------------------------------------------------------------------
 # The installer copies its own .bat beside LangTechDepot's syncthing.exe as
 # modify-langtechdepot.bat and puts that folder on the user's PATH (see
@@ -61,6 +61,7 @@ function Exit-Script {
 #   modify-langtechdepot add Android_apps Keyman   subscribe (un-ignoring if needed)
 #   modify-langtechdepot ignore Android_apps       unsubscribe and ignore
 #   modify-langtechdepot list                      every folder and its state
+#   modify-langtechdepot repair [Android_apps]     reset folders and match the depot again
 # Only the folders named are changed; everything else is left as it is, and
 # no dialog is shown. With no arguments it is the ordinary installer. It is
 # the same script either way, so there is no second program to keep in step.
@@ -73,6 +74,7 @@ function Show-Usage {
     Write-Host "  $ScriptName add <FolderID> [<FolderID> ...]     subscribe to folders"
     Write-Host "  $ScriptName ignore <FolderID> [<FolderID> ...]  stop syncing folders, and ignore them"
     Write-Host "  $ScriptName list                                show every folder and its state"
+    Write-Host "  $ScriptName repair [<FolderID> ...]             make folders match the depot again (all, if none named)"
     Write-Host "  $ScriptName version                             which version this is"
     Write-Host "  $ScriptName                                     choose folders in a window"
 }
@@ -87,7 +89,7 @@ if ($CliMode) {
         Write-Host "LangTechDepot $LTD_VERSION"
         Exit-Script -Code 0
     }
-    if ($Action -notin @("add", "ignore", "list")) {
+    if ($Action -notin @("add", "ignore", "list", "repair")) {
         Write-Host "${ScriptName}: '$Action' is not something this can do."
         Show-Usage
         Exit-Script -Code 2
@@ -97,7 +99,7 @@ if ($CliMode) {
         Show-Usage
         Exit-Script -Code 2
     }
-    if ($Action -ne "list" -and $FolderIDs.Count -eq 0) {
+    if ($Action -in @("add", "ignore") -and $FolderIDs.Count -eq 0) {
         Write-Host "${ScriptName}: '$Action' needs at least one folder ID."
         Show-Usage
         Exit-Script -Code 2
@@ -803,6 +805,21 @@ Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/defaults/folder" -Bo
     path = $DATA_ROOT
 } | Out-Null
 
+# Uploads to distant computers are capped at 10 KiB/s; the local network is
+# not (limitBandwidthInLan false), so machines in the same room still share at
+# full speed (G5). A client never uploads files to the server - it is Receive
+# Only - so the cap only stops field machines elsewhere in the world drawing on
+# this one's upload link, often slow or paid for; they get their files from
+# the server instead. Only this depot's own Syncthing (pinned --home) is set.
+try {
+    Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/options" -Body @{
+        maxSendKbps         = 10
+        limitBandwidthInLan = $false
+    } | Out-Null
+} catch {
+    Write-Host "Note: could not set the upload limit for distant computers: $_"
+}
+
 # -----------------------------------------------------------------------------
 # Make the LangTechDepot folder easy to find and use
 # -----------------------------------------------------------------------------
@@ -913,10 +930,20 @@ $assetsText
       When every folder there says "Up to Date", you have everything -
       check this before you travel.
 
+  Set aside (only there if it was ever needed)
+      Files that were found in your Assets but did not come from the depot.
+      They are not shared with anyone. Check them before using them, and
+      delete them when you are sure you don't need them.
+
+Computers on the same local network share these files with each other at
+full speed. Computers elsewhere can take only a trickle from yours, so your
+upload link stays yours.
+
 For Command Prompt users:
   modify-langtechdepot list                 every folder and its state
   modify-langtechdepot add <FolderID>       subscribe to a folder
   modify-langtechdepot ignore <FolderID>    stop syncing a folder
+  modify-langtechdepot repair               make every folder match the depot again
 
 Help: $HELP_URL
 "@
@@ -1157,6 +1184,277 @@ if ($offeredEntries.Count -eq 0) {
     Write-Host "please run this again later. More help: $HELP_URL"
     if (-not $CliMode -or $Action -eq "list") { Exit-Script -Code 1 }
     # add/ignore can still act on folders this computer already knows.
+}
+
+# -----------------------------------------------------------------------------
+# Keep every depot folder the way the depot made it
+# -----------------------------------------------------------------------------
+# Three checks on every run (not for "list", which changes nothing):
+#
+#  1. A depot folder accepted from another computer, not from the server,
+#     gets the server added. Such a folder is out of the server's reach: when
+#     its guard undoes a bad change (Override), the fix never arrives here,
+#     and a link to a bad computer that a user accepted by hand outlives the
+#     guard's cut-off. Tested on 20-23 Nov 2026 with Test_folder. The folder
+#     is kept, as the user evidently wanted it.
+#  2. A depot folder switched to Send & Receive is reset: removed and added
+#     again as Receive Only, with the same ID, label, path and computers.
+#     Setting it back to Receive Only would not be enough: what it announced
+#     meanwhile stays in its history and is offered again at every reconnect,
+#     so the guard would cut this computer off again each time. The files are
+#     kept and adopted as they are, with no new download (tested with
+#     French_win). Then the clean-up: whatever did not come from the depot is
+#     moved to "Set aside", and Revert makes the folder match the server
+#     again. The clean-up needs the server's copy of the folder's index, so
+#     if this computer is cut off it waits in cleanup-pending.txt for a later
+#     run. "modify-langtechdepot repair" does both halves on request, for a
+#     folder that is Receive Only again but still has that history.
+#  3. Folders ignored on the server are ignored on every other computer too,
+#     so other field machines stop offering them (the invitations seen at
+#     workshops), and nobody accepts a depot folder from them (see 1).
+# Receive-only is a promise (intent.md): this keeps it rather than bending it.
+$CATALOG_IDS = @(@(Get-CatalogEntries -CatalogPath $CATALOG_FILE) | ForEach-Object { [string]$_.FolderID })
+$DEPOT_IDS   = @($CATALOG_IDS + $AUTO_FOLDER_ID | Select-Object -Unique)
+$PendingFile = Join-Path $CONFIG_DIR "cleanup-pending.txt"
+$SetAsideDir = Join-Path $HOME_BASE "Set aside"
+
+# This device's depot folders, with their full settings.
+function Get-DepotFolders {
+    $list = [System.Collections.ArrayList]::new()
+    foreach ($fld in (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/folders")) {
+        if ($fld.id -and ($DEPOT_IDS -ccontains [string]$fld.id)) { $list.Add($fld) | Out-Null }
+    }
+    return $list.ToArray()
+}
+
+function Get-PendingCleanups {
+    if (-not (Test-Path -LiteralPath $PendingFile)) { return @() }
+    return @([System.IO.File]::ReadAllLines($PendingFile, $Utf8NoBom) |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+}
+
+function Set-PendingCleanups {
+    param([string[]]$Ids)
+    $Ids = @($Ids | Where-Object { $_ } | Select-Object -Unique)
+    if ($Ids.Count) {
+        [System.IO.File]::WriteAllText($PendingFile, (($Ids -join "`r`n") + "`r`n"), $Utf8NoBom)
+    } elseif (Test-Path -LiteralPath $PendingFile) {
+        Remove-Item -LiteralPath $PendingFile
+    }
+}
+
+# Check 1.
+function Add-ServerToPeerFolders {
+    foreach ($fld in @(Get-DepotFolders)) {
+        $devs = @($fld.devices | Where-Object { $_ -and $_.deviceID })
+        if ($devs | Where-Object { $_.deviceID -eq $SERVER_ID }) { continue }
+        # PATCH replaces the whole list, so the computers already there are
+        # sent back with the server added.
+        $newDevs = @($devs) + @(@{ deviceID = $SERVER_ID; encryptionPassword = "" })
+        Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/folders/$($fld.id)" -Body @{ devices = $newDevs } | Out-Null
+        Set-FolderIgnored -FolderID $fld.id -Label $fld.label -Ignore $false
+        Write-Host "$($fld.id) came from another computer, not the depot. It now comes from"
+        Write-Host "the depot server too, which keeps it correct."
+    }
+}
+
+# Check 2, first half. The folder's own settings are sent back whole, so
+# nothing changes but its type and its history.
+function Reset-DepotFolder {
+    param($Folder)
+    $copy = $Folder | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+    $copy.type = "receiveonly"
+    Invoke-SyncthingApi -Method "DELETE" -Endpoint "/rest/config/folders/$($Folder.id)" | Out-Null
+    Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/config/folders" -Body $copy | Out-Null
+}
+
+# True when the server is connected, has sent its index of this folder, and
+# our own scan is done: only then can Syncthing tell which files did not come
+# from the server.
+function Test-ServerIndexReady {
+    param([string]$FolderID)
+    try {
+        $conns = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/system/connections"
+        $c = $conns.connections.$SERVER_ID
+        if (-not ($c -and $c.connected)) { return $false }
+        $comp = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/db/completion?folder=$FolderID&device=$SERVER_ID"
+        if ($comp.remoteState -and $comp.remoteState -ne "valid") { return $false }
+        $stat = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/db/status?folder=$FolderID"
+        return ($stat.state -eq "idle")
+    } catch {
+        return $false
+    }
+}
+
+# Check 2, second half. Moving first means a user's own files are never lost:
+# Revert alone would delete them.
+function Clear-DepotFolder {
+    param($Folder)
+    $fid = [string]$Folder.id
+    $dest = Join-Path (Join-Path $SetAsideDir (Get-Date -Format "yyyy-MM-dd HHmm")) $fid
+    $moved = 0
+    $changed = Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/db/localchanged?folder=$fid&perpage=100000"
+    foreach ($f in @($changed.files)) {
+        if (-not $f -or -not $f.name -or $f.deleted) { continue }   # deleted: Revert fetches it back
+        $src = Join-Path $Folder.path $f.name
+        if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }   # folders: Revert tidies them
+        $dst = Join-Path $dest $f.name
+        New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+        Move-Item -LiteralPath $src -Destination $dst -Force
+        $moved++
+    }
+    if ($moved) {
+        # So that Syncthing sees the files gone before it reverts.
+        Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/db/scan?folder=$fid" | Out-Null
+    }
+    Invoke-SyncthingApi -Method "POST" -Endpoint "/rest/db/revert?folder=$fid" | Out-Null
+    if ($moved) {
+        Write-Host "${fid}: $moved file(s) that did not come from the depot were moved to"
+        Write-Host "    $dest"
+    }
+    Write-Host "${fid}: matches the depot again."
+}
+
+# Runs the clean-up for every folder waiting for it, as soon as the server
+# has answered for that folder, for up to $Seconds. Returns $true when none
+# is left waiting.
+function Complete-PendingCleanups {
+    param([int]$Seconds)
+    $ids = @(Get-PendingCleanups)
+    if (-not $ids.Count) { return $true }
+    $todo = @{}
+    foreach ($f in @(Get-DepotFolders)) { if ($ids -ccontains [string]$f.id) { $todo[[string]$f.id] = $f } }
+    # A folder removed since (as the guard's email suggests) needs nothing.
+    if ($todo.Count) {
+        Write-Host "Checking $(@($todo.Keys) -join ', ') against the depot server (up to $Seconds seconds)..."
+    }
+    # Ready twice in a row, five seconds apart, so a half-arrived index is
+    # not taken for the whole one.
+    $readyBefore = @{}
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ($todo.Count -and (Get-Date) -lt $deadline) {
+        foreach ($fid in @($todo.Keys)) {
+            if (Test-ServerIndexReady -FolderID $fid) {
+                if ($readyBefore[$fid]) {
+                    try {
+                        Clear-DepotFolder -Folder $todo[$fid]
+                        $todo.Remove($fid)
+                    } catch {
+                        Write-Host "Note: could not finish $fid this time: $_"
+                        $readyBefore[$fid] = $false
+                    }
+                } else {
+                    $readyBefore[$fid] = $true
+                }
+            } else {
+                $readyBefore[$fid] = $false
+            }
+        }
+        if ($todo.Count) { Start-Sleep -Seconds 5 }
+    }
+    Set-PendingCleanups -Ids @($todo.Keys)
+    if ($todo.Count) {
+        Write-Host ""
+        Write-Host "Not finished yet for: $(@($todo.Keys) -join ', ')"
+        Write-Host "The depot server did not answer for it. If the depot's administrator has"
+        Write-Host "cut this computer off, that is expected: once they have restored it, run"
+        Write-Host "Change my Assets again, and this will be finished then."
+        Write-Host ""
+        return $false
+    }
+    return $true
+}
+
+# Check 3. One PATCH per computer, and only where something changes. Entries
+# that are not about depot folders are left alone.
+function Sync-PeerIgnores {
+    # foreach, not @(...): Invoke-RestMethod hands back a JSON array as one
+    # object, which @(...) would wrap rather than unroll.
+    $devs = @(foreach ($d in (Invoke-SyncthingApi -Method "GET" -Endpoint "/rest/config/devices")) { $d })
+    $server = $devs | Where-Object { $_.deviceID -eq $SERVER_ID } | Select-Object -First 1
+    if (-not $server) { return }
+    $want = @($server.ignoredFolders | Where-Object { $_ -and $_.id -and ($DEPOT_IDS -ccontains [string]$_.id) })
+    $wantIds = @($want | ForEach-Object { [string]$_.id })
+    foreach ($d in $devs) {
+        if ($d.deviceID -eq $SERVER_ID -or $d.deviceID -eq $MY_ID) { continue }
+        $cur = @($d.ignoredFolders | Where-Object { $_ -and $_.id })
+        $curIds = @($cur | ForEach-Object { [string]$_.id })
+        # Depot folders follow the server's list; anything else stays.
+        $keep = @($cur | Where-Object { -not ($DEPOT_IDS -ccontains [string]$_.id) -or ($wantIds -ccontains [string]$_.id) })
+        $add  = @($want | Where-Object { -not ($curIds -ccontains [string]$_.id) })
+        if ($keep.Count -eq $cur.Count -and $add.Count -eq 0) { continue }
+        $new = @($keep) + @($add | ForEach-Object { @{ id = $_.id; label = $_.label; time = $_.time } })
+        Invoke-SyncthingApi -Method "PATCH" -Endpoint "/rest/config/devices/$($d.deviceID)" -Body @{ ignoredFolders = $new } | Out-Null
+    }
+}
+
+if ($Action -ne "list") {
+    try {
+        Add-ServerToPeerFolders
+    } catch {
+        Write-Host "Note: could not check where your folders come from: $_"
+    }
+    try {
+        $pending = @(Get-PendingCleanups)
+        foreach ($fld in @(Get-DepotFolders)) {
+            if ($fld.type -eq "receiveonly") { continue }
+            Reset-DepotFolder -Folder $fld
+            Write-Host "$($fld.id) had been switched to Send & Receive. It is Receive Only again."
+            $pending += [string]$fld.id
+        }
+        Set-PendingCleanups -Ids $pending
+        # "repair" runs its own, longer wait below.
+        if ($Action -ne "repair") { Complete-PendingCleanups -Seconds 60 | Out-Null }
+    } catch {
+        Write-Host "Note: could not check your folders' settings: $_"
+    }
+    try {
+        Sync-PeerIgnores
+    } catch {
+        Write-Host "Note: could not update which folders other computers may offer: $_"
+    }
+}
+
+if ($Action -eq "repair") {
+    $depotNow = @(Get-DepotFolders)
+    $targets = [System.Collections.ArrayList]::new()
+    $problems = 0
+    if ($FolderIDs.Count -eq 0) {
+        foreach ($f in $depotNow) { $targets.Add($f) | Out-Null }
+    } else {
+        foreach ($want in $FolderIDs) {
+            $f = $depotNow | Where-Object { $_.id -ceq $want } | Select-Object -First 1
+            if (-not $f) { $f = $depotNow | Where-Object { $_.id -ieq $want } | Select-Object -First 1 }
+            if (-not $f) {
+                Write-Host "${ScriptName}: this computer has no folder called '$want'. Type '$ScriptName list' to see them."
+                $problems++
+            } elseif (-not ($targets | Where-Object { $_.id -ceq $f.id })) {
+                $targets.Add($f) | Out-Null
+            }
+        }
+    }
+    if ($problems) {
+        Write-Host "Nothing was changed."
+        Exit-Script -Code 1
+    }
+    # Each folder is reset only once: one reset above already counts.
+    $pendingNow = @(Get-PendingCleanups)
+    foreach ($f in $targets) {
+        if ($pendingNow -ccontains [string]$f.id) { continue }
+        try {
+            Reset-DepotFolder -Folder $f
+            Write-Host "$($f.id): reset."
+            $pendingNow += [string]$f.id
+        } catch {
+            Write-Host "Could not reset $($f.id): $_"
+            $problems++
+        }
+    }
+    Set-PendingCleanups -Ids $pendingNow
+    $done = Complete-PendingCleanups -Seconds 120
+    if ($problems -or -not $done) { Exit-Script -Code 1 }
+    Write-Host "Done."
+    Exit-Script -Code 0
 }
 
 # -----------------------------------------------------------------------------
@@ -1575,6 +1873,13 @@ foreach ($item in $selections) {
             $Failures++
         }
     }
+}
+
+# Folders just ignored are ignored on every other computer too (check 3 above).
+try {
+    Sync-PeerIgnores
+} catch {
+    Write-Host "Note: could not update which folders other computers may offer: $_"
 }
 
 # ============================================================================

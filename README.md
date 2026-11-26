@@ -134,6 +134,7 @@ are available in any new Command Prompt:
 modify-langtechdepot list 
 modify-langtechdepot add <FolderID>...
 modify-langtechdepot ignore <FolderID>...
+modify-langtechdepot repair [<FolderID>...]
 ```
 (with no arguments it is the installer again, dialog and all).
 
@@ -150,7 +151,15 @@ address, since the port moves if something else holds it. Files land under
 `~/LangTechDepot/Assets/` (or `%USERPROFILE%\LangTechDepot\Assets\`, or
 wherever the user pointed it; `Assets` is then a link or shortcut to there).
 On both, the installer keeps itself as `modify-langtechdepot`, which the
-"Change my Assets" item in the LangTechDepot folder runs.
+"Change my Assets" item in the LangTechDepot folder runs. On Linux it also takes
+`repair [<FolderID>...]`, as on Windows.
+
+Every run (from 1.3) also keeps the depot folders as the depot made them: a folder
+switched to Send & Receive is reset to Receive Only and cleaned up (files that did
+not come from the depot go to `LangTechDepot/Set aside`), a depot folder accepted
+from another field machine gets the server added, and folders ignored on the
+server are ignored on every other device too. `repair` does the reset and clean-up
+on request. Uploads to distant peers are capped at 10 KiB/s; the LAN is not.
 
 On Linux,
 `langtechdepot-subscribe.sh` lists the catalog and subscribes by folder ID

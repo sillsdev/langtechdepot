@@ -31,7 +31,8 @@ California repository server and is not in here.
    offering them. Re-running the installer (or `modify-langtechdepot add`) brings them back.
 
 Server folders are **Send Only**; clients are receive-only. Every catalog folder is offered
-to every registered device. Syncthing's introducer mode lets clients learn each other, so
+to every registered device. Ignored folders are copied to **every other device's**
+`ignoredFolders` too (1.3), so field machines stop offering them to each other. Syncthing's introducer mode lets clients learn each other, so
 office LANs sync peer-to-peer — that is the bandwidth saving, and it stays.
 
 **Introducer mode has a cost, and the guard pays it.** A receive-only folder accepts newer
@@ -253,6 +254,25 @@ only stops the reconciler from re-adding it.
   `Invoke-RestMethod` callers shouldn't have to. `$GUI_PAGE` is for messages and
   shortcuts, `$GUI_URL` for API calls.
 - Installers are idempotent and re-runnable.
+- **Every run keeps depot folders as the depot made them** (1.3; not for `list`).
+  Three checks, before the folder list, in both installers: (1) a depot folder
+  accepted from a peer gets the server added to its devices, so the guard's Override
+  reaches it - a peer-only copy is out of the server's reach, and a hand-accepted
+  link to a bad device outlives the guard's cut-off (tested Nov 2026); (2) a depot
+  folder that is not `receiveonly` is reset - DELETE, then POST its own config back
+  with `type: receiveonly` - which drops its history (the files are adopted, not
+  downloaded again), then cleaned up once the server's index is in: files in
+  `/rest/db/localchanged` go to `$HOME_BASE/Set aside/<date>/<id>`, then Revert.
+  While the server is out of reach (cut off by the guard) the clean-up waits in
+  `cleanup-pending.txt` in the config dir for a later run; (3) the server device's
+  ignored depot folders are mirrored onto every other device. `modify-langtechdepot
+  repair [ids]` does the reset and clean-up on request, for a folder that is Receive
+  Only again but still has history. Both installers also cap uploads at
+  `maxSendKbps: 10` with `limitBandwidthInLan: false`, so distant peers fall back
+  to the server and the LAN stays at full speed.
+- **Windows PowerShell hands a JSON array back as one object.** `@(Invoke-RestMethod
+  ...)` then wraps it instead of unrolling it, and a loop sees one item. Unroll with
+  `foreach ($x in (Invoke-SyncthingApi ...))`, as the script does throughout.
 - **Quote every attribute in the inline SVG.** `stroke-width=2/>` parses as
   `stroke-width="2/"`, the tag never closes, and every following shape becomes an
   invisible child of the first one — a blank illustration with no error anywhere.

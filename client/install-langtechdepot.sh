@@ -25,8 +25,23 @@ HELP_URL='https://depot.langtech.cloud/help.html'
 # list's title and in READ-ME.txt, so a user can tell a helper which one ran.
 LTD_VERSION="dev"
 
+# With no arguments: the ordinary installer, folder list and all. The other
+# forms are for modify-langtechdepot, which is this script under another name.
+MODE=normal
+REPAIR_IDS=()
 case "${1:-}" in
     version|--version) echo "$LTD_VERSION"; exit 0 ;;
+    help|--help|-h)
+        echo "Usage:"
+        echo "  modify-langtechdepot                         choose folders in a window"
+        echo "  modify-langtechdepot repair [<FolderID>...]  make folders match the depot again"
+        echo "                                               (all of them, if none is named)"
+        echo "  modify-langtechdepot version                 which version this is"
+        exit 0 ;;
+    repair) MODE=repair; shift; REPAIR_IDS=("$@") ;;
+    '') ;;
+    *) echo "modify-langtechdepot: '$1' is not something this can do. Try: modify-langtechdepot help" >&2
+       exit 2 ;;
 esac
 echo "LangTechDepot installer, version $LTD_VERSION"
 echo
@@ -293,6 +308,11 @@ if [ -n "$EXISTING_SERVER_ID" ]; then
     SERVER_ID="$EXISTING_SERVER_ID"
     sleep 3
     echo " "
+elif [ "$MODE" = repair ]; then
+    # Asking for a token in the middle of a repair would be a surprise.
+    echo "This computer is not registered with LangTechDepot yet, so there is nothing to repair." >&2
+    echo "Run the installer first. Help: $HELP_URL" >&2
+    exit 1
 else
     # Not yet registered with LangTechDepot -> Prompt for token
     echo "No token yet? Register at $REGISTER_URL/signup?os=linux"
@@ -380,6 +400,9 @@ if [ -n "$SAVED_ROOT" ] && same_path "$SAVED_ROOT" "$HOME"; then SAVED_ROOT=''; 
 
 if [ -n "$SAVED_ROOT" ]; then
     DATA_ROOT="$SAVED_ROOT"
+elif [ "$MODE" = repair ]; then
+    # Never a window in a repair; the usual place it is.
+    DATA_ROOT="$DEFAULT_ASSETS"
 else
     echo
     echo "Next: where to keep your LangTechDepot Assets - the folders of files"
@@ -445,6 +468,14 @@ mkdir -p -- "$DATA_ROOT"
 DEFAULTS_JSON=$(python3 -c 'import json,sys; print(json.dumps({"type": "receiveonly", "path": sys.argv[1]}))' "$DATA_ROOT")
 api PATCH /rest/config/defaults/folder "$DEFAULTS_JSON" >/dev/null ||
     after_registration_failed "Could not set Syncthing's folder defaults on this computer."
+
+# Uploads to distant computers are capped at 10 KiB/s; the local network is
+# not, so machines in the same room still share at full speed (G5). A client
+# never uploads files to the server - it is Receive Only - so the cap only
+# stops field machines elsewhere drawing on this one's upload link. See the
+# Windows installer for the rest. Not fatal: everything works without it.
+api PATCH /rest/config/options '{"maxSendKbps": 10, "limitBandwidthInLan": false}' >/dev/null ||
+    echo "Note: could not set the upload limit for distant computers."
 
 # -----------------------------------------------------------------------------
 # The LangTechDepot folder: the part people use
@@ -525,8 +556,18 @@ $ASSETS_TEXT
       When every folder there says "Up to Date", you have everything -
       check this before you travel.
 
+  Set aside (only there if it was ever needed)
+      Files that were found in your Assets but did not come from the depot.
+      They are not shared with anyone. Check them before using them, and
+      delete them when you are sure you don't need them.
+
+Computers on the same local network share these files with each other at
+full speed. Computers elsewhere can take only a trickle from yours, so your
+upload link stays yours.
+
 In a terminal:
   modify-langtechdepot            the same list of folders
+  modify-langtechdepot repair     make every folder match the depot again
   modify-langtechdepot version    which version is installed
   (If that command is not found, log out and back in once, or type
   ~/.local/bin/modify-langtechdepot instead.)
@@ -677,7 +718,7 @@ done
 #    not the whole device object (GET + PUT), so a concurrent change to the
 #    device cannot be overwritten.
 PICKER_PY=$(cat <<'PY'
-import json, re, sys, urllib.request, urllib.error, datetime, html
+import json, re, sys, os, shutil, time, urllib.request, urllib.error, urllib.parse, datetime, html
 
 def api(method, path, body=None):
     data = json.dumps(body).encode() if body is not None else None
@@ -742,6 +783,181 @@ def read_selections(path):
                 rows.append({'tick': parts[0].upper() == 'TRUE', 'now': parts[1], 'id': parts[3], 'desc': '|'.join(parts[4:])})
     return rows
 
+def set_ignored(fid, label, ignore):
+    """Add or remove one folder in the server device's ignoredFolders. PATCH,
+    not PUT, so nothing else on the device can be overwritten."""
+    cur = ignored_list()
+    has = any(i['id'] == fid for i in cur)
+    if ignore and not has:
+        now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        cur.append({'id': fid, 'label': label, 'time': now})
+    elif not ignore and has:
+        cur = [i for i in cur if i['id'] != fid]
+    else:
+        return False
+    api('PATCH', '/rest/config/devices/' + SERVER, {'ignoredFolders': cur})
+    return True
+
+# --- Keeping every depot folder the way the depot made it (1.3) -------------
+# The same three checks as the Windows installer, which explains them in full:
+#  1. a depot folder accepted from another computer gets the server added, so
+#     the guard's Override reaches it;
+#  2. a depot folder switched to Send & Receive is reset (removed and added
+#     again as Receive Only, files kept), then cleaned up: whatever did not
+#     come from the depot goes to "Set aside", and Revert matches the server.
+#     The clean-up waits in cleanup-pending.txt while the server is out of
+#     reach (cut off by its guard, say); "repair" does both halves on request;
+#  3. folders ignored on the server are ignored on every other computer too,
+#     so they stop offering them.
+
+def q(s):
+    return urllib.parse.quote(s, safe='')
+
+def depot_ids():
+    return {e['id'] for e in catalog()} | {ALWAYS}
+
+def depot_folders():
+    ids = depot_ids()
+    return [f for f in api('GET', '/rest/config/folders') or [] if f.get('id') in ids]
+
+def read_pending(path):
+    try:
+        with open(path, encoding='utf-8') as f:
+            return list(dict.fromkeys(l.strip() for l in f if l.strip()))
+    except FileNotFoundError:
+        return []
+
+def write_pending(path, ids):
+    ids = list(dict.fromkeys(i for i in ids if i))
+    if ids:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(ids) + '\n')
+    elif os.path.exists(path):
+        os.remove(path)
+
+def add_server_to_peer_folders():
+    for f in depot_folders():
+        devs = [d for d in f.get('devices') or [] if d.get('deviceID')]
+        if any(d['deviceID'] == SERVER for d in devs):
+            continue
+        # PATCH replaces the whole list, so the computers already there go back too.
+        devs.append({'deviceID': SERVER, 'encryptionPassword': ''})
+        api('PATCH', '/rest/config/folders/' + q(f['id']), {'devices': devs})
+        set_ignored(f['id'], f.get('label') or f['id'], False)
+        print(f"{f['id']} came from another computer, not the depot. It now comes from")
+        print('the depot server too, which keeps it correct.')
+
+def reset_folder(f):
+    # Its own settings go back whole: only its type and its history change.
+    copy = dict(f)
+    copy['type'] = 'receiveonly'
+    api('DELETE', '/rest/config/folders/' + q(f['id']))
+    api('POST', '/rest/config/folders', copy)
+
+def server_index_ready(fid):
+    """The server is connected and has sent its index of this folder, and our
+    own scan is done: only then can Syncthing tell what did not come from it."""
+    try:
+        conns = (api('GET', '/rest/system/connections') or {}).get('connections') or {}
+        if not (conns.get(SERVER) or {}).get('connected'):
+            return False
+        comp = api('GET', f'/rest/db/completion?folder={q(fid)}&device={q(SERVER)}') or {}
+        if comp.get('remoteState') not in (None, '', 'valid'):
+            return False
+        return (api('GET', f'/rest/db/status?folder={q(fid)}') or {}).get('state') == 'idle'
+    except Exception:
+        return False
+
+def clear_folder(f, set_aside):
+    """Move what did not come from the depot to Set aside, then Revert. Moving
+    first means a user's own files are never lost: Revert alone deletes them."""
+    fid = f['id']
+    root = os.path.expanduser(f.get('path') or '')
+    dest = os.path.join(set_aside, time.strftime('%Y-%m-%d %H%M'), fid)
+    moved = 0
+    changed = api('GET', f'/rest/db/localchanged?folder={q(fid)}&perpage=100000') or {}
+    for x in changed.get('files') or []:
+        name = x.get('name')
+        if not name or x.get('deleted'):
+            continue   # deleted: Revert fetches it back
+        src = os.path.join(root, name)
+        if not (os.path.isfile(src) or os.path.islink(src)):
+            continue   # folders: Revert tidies them
+        dst = os.path.join(dest, name)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.move(src, dst)
+        moved += 1
+    if moved:
+        api('POST', f'/rest/db/scan?folder={q(fid)}')   # so Syncthing sees them gone first
+    api('POST', f'/rest/db/revert?folder={q(fid)}')
+    if moved:
+        print(f'{fid}: {moved} file(s) that did not come from the depot were moved to')
+        print(f'    {dest}')
+    print(f'{fid}: matches the depot again.')
+
+def complete_pending(pending_path, set_aside, seconds):
+    """Clean up every folder waiting for it, as soon as the server has answered
+    for it, for up to `seconds`. True when none is left waiting."""
+    ids = read_pending(pending_path)
+    if not ids:
+        return True
+    todo = {f['id']: f for f in depot_folders() if f['id'] in ids}
+    # A folder removed since (as the guard's email suggests) needs nothing.
+    if todo:
+        print(f"Checking {', '.join(todo)} against the depot server (up to {seconds} seconds)...")
+    ready_before = {}
+    deadline = time.time() + seconds
+    while todo and time.time() < deadline:
+        for fid in list(todo):
+            if server_index_ready(fid):
+                # Ready twice in a row, so a half-arrived index is not taken for the whole.
+                if ready_before.get(fid):
+                    try:
+                        clear_folder(todo.pop(fid), set_aside)
+                    except Exception as e:
+                        print(f'Note: could not finish {fid} this time: {e}')
+                        todo[fid] = next(f for f in depot_folders() if f['id'] == fid)
+                        ready_before[fid] = False
+                else:
+                    ready_before[fid] = True
+            else:
+                ready_before[fid] = False
+        if todo:
+            time.sleep(5)
+    write_pending(pending_path, list(todo))
+    if todo:
+        print()
+        print(f"Not finished yet for: {', '.join(todo)}")
+        print("The depot server did not answer for it. If the depot's administrator has")
+        print('cut this computer off, that is expected: once they have restored it, run')
+        print('Change-my-Assets again, and this will be finished then.')
+        print()
+        return False
+    return True
+
+def sync_peer_ignores(my_id):
+    """Folders ignored on the server are ignored on every other computer too.
+    One PATCH per computer, only where something changes; entries that are
+    not about depot folders are left alone."""
+    devs = api('GET', '/rest/config/devices') or []
+    server = next((d for d in devs if d.get('deviceID') == SERVER), None)
+    if not server:
+        return
+    ids = depot_ids()
+    want = [i for i in server.get('ignoredFolders') or [] if isinstance(i, dict) and i.get('id') in ids]
+    want_ids = {i['id'] for i in want}
+    for d in devs:
+        if d.get('deviceID') in (SERVER, my_id):
+            continue
+        cur = [i for i in d.get('ignoredFolders') or [] if isinstance(i, dict) and i.get('id')]
+        cur_ids = {i['id'] for i in cur}
+        keep = [i for i in cur if i['id'] not in ids or i['id'] in want_ids]
+        add = [{'id': i['id'], 'label': i.get('label', ''), 'time': i.get('time', '')}
+               for i in want if i['id'] not in cur_ids]
+        if len(keep) == len(cur) and not add:
+            continue
+        api('PATCH', '/rest/config/devices/' + q(d['deviceID']), {'ignoredFolders': keep + add})
+
 cmd = sys.argv[1]
 GUI, KEY, SERVER, CATALOG, ALWAYS = sys.argv[2:7]
 args = sys.argv[7:]
@@ -789,6 +1005,69 @@ elif cmd == 'fixlabels':
     if changed:
         api('PATCH', '/rest/config/devices/' + SERVER, {'ignoredFolders': cur})
 
+elif cmd == 'checks':
+    # Every run, before the list: checks 1-3. A repair does its own wait.
+    pending_path, set_aside, my_id, mode = args[0], args[1], args[2], args[3]
+    try:
+        add_server_to_peer_folders()
+    except Exception as e:
+        print(f'Note: could not check where your folders come from: {e}')
+    try:
+        pending = read_pending(pending_path)
+        for f in depot_folders():
+            if f.get('type') == 'receiveonly':
+                continue
+            reset_folder(f)
+            print(f"{f['id']} had been switched to Send & Receive. It is Receive Only again.")
+            pending.append(f['id'])
+        write_pending(pending_path, pending)
+        if mode != 'repair':
+            complete_pending(pending_path, set_aside, 60)
+    except Exception as e:
+        print(f"Note: could not check your folders' settings: {e}")
+    try:
+        sync_peer_ignores(my_id)
+    except Exception as e:
+        print(f'Note: could not update which folders other computers may offer: {e}')
+
+elif cmd == 'syncignores':
+    sync_peer_ignores(args[0])
+
+elif cmd == 'repair':
+    pending_path, set_aside, names = args[0], args[1], args[2:]
+    have = depot_folders()
+    targets, problems = [], 0
+    if not names:
+        targets = have
+    for want in names:
+        f = (next((x for x in have if x['id'] == want), None) or
+             next((x for x in have if x['id'].lower() == want.lower()), None))
+        if not f:
+            print(f"modify-langtechdepot: this computer has no folder called '{want}'.")
+            problems += 1
+        elif f not in targets:
+            targets.append(f)
+    if problems:
+        print('Nothing was changed.')
+        sys.exit(1)
+    # Each folder is reset once: one reset by the checks just now counts.
+    pending = read_pending(pending_path)
+    for f in targets:
+        if f['id'] in pending:
+            continue
+        try:
+            reset_folder(f)
+            print(f"{f['id']}: reset.")
+            pending.append(f['id'])
+        except Exception as e:
+            print(f"Could not reset {f['id']}: {e}")
+            problems += 1
+    write_pending(pending_path, pending)
+    done = complete_pending(pending_path, set_aside, 120)
+    if problems or not done:
+        sys.exit(1)
+    print('Done.')
+
 elif cmd == 'state':
     sel_path, mode, state_path = args[0], args[1], args[2]
     state = read_state(state_path)
@@ -806,18 +1085,6 @@ elif cmd == 'apply':
     except Exception as e:
         print(f'Warning: could not fetch the active folders list: {e}'); subs = set()
     failures = 0
-    def set_ignored(fid, label, ignore):
-        cur = ignored_list()
-        has = any(i['id'] == fid for i in cur)
-        if ignore and not has:
-            now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-            cur.append({'id': fid, 'label': label, 'time': now})
-        elif not ignore and has:
-            cur = [i for i in cur if i['id'] != fid]
-        else:
-            return False
-        api('PATCH', '/rest/config/devices/' + SERVER, {'ignoredFolders': cur})
-        return True
     for r in read_selections(sel_path):
         fid, desc = r['id'], r['desc']
         if fid == ALWAYS:
@@ -866,6 +1133,17 @@ picker_failed() {
 
 # Not fatal: the picker below works whether or not the old labels are fixed.
 picker fixlabels || echo "Note: could not repair folder labels (see above); the folders still sync."
+
+# Every depot folder kept the way the depot made it (see the helper above).
+PENDING_FILE="$CONFIG_DIR/cleanup-pending.txt"
+SET_ASIDE_DIR="$HOME_BASE/Set aside"
+picker checks "$PENDING_FILE" "$SET_ASIDE_DIR" "$MY_ID" "$MODE" ||
+    echo "Note: could not check your folders (see above); they still sync."
+if [ "$MODE" = repair ]; then
+    REPAIR_RC=0
+    picker repair "$PENDING_FILE" "$SET_ASIDE_DIR" ${REPAIR_IDS[@]+"${REPAIR_IDS[@]}"} || REPAIR_RC=$?
+    exit "$REPAIR_RC"
+fi
 
 while true; do
     picker rows "$PICK_STATE" "$SHOW_IGNORED" "$HIDDEN_COUNT_FILE" > "$YAD_TEMP_INPUT" || picker_failed
@@ -917,6 +1195,9 @@ fi
 
 picker apply "$SELECTIONS_FILE" "$DATA_ROOT" ||
     echo "Some changes failed - see above. Run the installer again to retry them (no new token needed). Help: $HELP_URL"
+# Folders just ignored are ignored on every other computer too.
+picker syncignores "$MY_ID" ||
+    echo "Note: could not update which folders other computers may offer."
 
 echo " "
 echo "Your LangTechDepot folder is $HOME_BASE"
